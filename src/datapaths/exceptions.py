@@ -9,3 +9,6 @@ class RegistryError(DatapathsError):
 
 class ArtifactError(DatapathsError):
     pass
+
+class ConfigWarning(UserWarning):
+    """A config file was usable, but part of it was not."""

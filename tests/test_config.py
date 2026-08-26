@@ -7,6 +7,7 @@ explicit argument > environment variable > configs/ default.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -21,7 +22,7 @@ from datapaths.config import (
     load_roots,
     resolve_repo_root,
 )
-from datapaths.exceptions import ConfigError
+from datapaths.exceptions import ConfigError, ConfigWarning
 
 
 class TestDefaults:
@@ -158,7 +159,8 @@ class TestLoadRoots:
         """A nested or non-string entry is dropped, and the rest still load.
 
         Deliberate: a hand-edited roots file with one bad line should not take
-        the whole session down when the root the caller wants is fine.
+        the whole session down when the root the caller wants is fine. It is
+        not silent, though -- see TestRootsFileDiagnostics.
         """
         repo.roots_file.write_text(
             "features: /abs/features\n"
@@ -166,5 +168,80 @@ class TestLoadRoots:
             "  nested: /abs/nope\n"
             "also_broken: [1, 2]\n"
         )
-        roots = load_roots(load_config())
+        with pytest.warns(ConfigWarning):
+            roots = load_roots(load_config())
         assert roots == {"features": Path("/abs/features")}
+
+
+class TestRootsFileDiagnostics:
+    """What the reader is told when a roots file is malformed.
+
+    A dropped entry only happens when the file is wrong, and by then the author
+    is looking at YAML that seemed fine to them. These pin that the diagnostic
+    names the offending key and points at the likely cause, because a message
+    saying only "something was skipped" leaves them no better off.
+    """
+
+    def test_partial_damage_warns_and_names_the_bad_key(self, repo):
+        repo.roots_file.write_text("features: /abs/features\nmodels:\n")
+        with pytest.warns(ConfigWarning, match="'models'") as record:
+            load_roots(load_config())
+        assert len(record) == 1
+
+    def test_warning_reports_the_parsed_type(self, repo):
+        repo.roots_file.write_text("features: /abs/features\nmodels: [/a, /b]\n")
+        with pytest.warns(ConfigWarning, match="list"):
+            load_roots(load_config())
+
+    def test_warning_says_what_did_load(self, repo):
+        repo.roots_file.write_text("features: /abs/f\ndata: /abs/d\nmodels:\n")
+        with pytest.warns(ConfigWarning, match="Loaded: data, features"):
+            load_roots(load_config())
+
+    def test_warning_names_the_file(self, repo):
+        repo.roots_file.write_text("features: /abs/features\nmodels:\n")
+        with pytest.warns(ConfigWarning, match=re.escape(str(repo.roots_file))):
+            load_roots(load_config())
+
+    def test_warning_suggests_causes(self, repo):
+        repo.roots_file.write_text("features: /abs/features\nmodels:\n")
+        with pytest.warns(ConfigWarning, match="indented under a top-level key"):
+            load_roots(load_config())
+
+    def test_a_wholly_nested_file_raises_instead_of_loading_nothing(self, repo):
+        """The mistake this exists for: one extra level of indentation.
+
+        It is an easy one to make, because the registry file really does nest
+        everything under 'artifacts:'. Returning {} here would surface as a
+        bare KeyError at the first lookup, with nothing pointing back at the
+        roots file.
+        """
+        repo.roots_file.write_text(
+            "roots:\n  features: /abs/features\n  data: /abs/data\n"
+        )
+        with pytest.raises(ConfigError, match="No usable roots"):
+            load_roots(load_config())
+
+    def test_that_error_explains_the_nesting(self, repo):
+        repo.roots_file.write_text("roots:\n  features: /abs/features\n")
+        with pytest.raises(ConfigError, match="no such wrapper"):
+            load_roots(load_config())
+
+    def test_that_error_names_the_offending_key(self, repo):
+        repo.roots_file.write_text("roots:\n  features: /abs/features\n")
+        with pytest.raises(ConfigError, match=re.escape("'roots' (dict)")):
+            load_roots(load_config())
+
+    def test_singular_phrasing_for_one_entry(self, repo):
+        repo.roots_file.write_text("roots:\n  features: /abs/features\n")
+        with pytest.raises(ConfigError, match="the only entry was skipped"):
+            load_roots(load_config())
+
+    def test_plural_phrasing_for_several(self, repo):
+        repo.roots_file.write_text("first:\n  a: 1\nsecond:\n  b: 2\n")
+        with pytest.raises(ConfigError, match="all 2 entries were skipped"):
+            load_roots(load_config())
+
+    def test_a_clean_file_warns_about_nothing(self, repo, recwarn):
+        load_roots(load_config())
+        assert [w for w in recwarn if issubclass(w.category, ConfigWarning)] == []

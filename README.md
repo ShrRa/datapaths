@@ -60,6 +60,12 @@ artifact reference mean the same thing to two people.
 Both are found relative to the repository root, which is discovered by walking up from the
 current working directory looking for `pyproject.toml` or `.git`.
 
+Note the roots file has **no top-level wrapper key** — the entries sit at the top level.
+(The registry file does nest everything under `artifacts:`, which makes this an easy
+mistake.) An entry that isn't a name mapped to a single path is skipped with a
+`ConfigWarning` naming it; if that leaves no roots at all, `load_roots` raises rather than
+handing back an empty mapping that would fail later as an unexplained `KeyError`.
+
 ## Overriding where the config files live
 
 The `configs/` names above are a default, not a requirement. Three environment variables
@@ -135,7 +141,7 @@ pip install -e ".[tabular,dev]"
 pytest
 ```
 
-186 tests, about four seconds. Installing without the `tabular` extra is supported and
+197 tests, about four seconds. Installing without the `tabular` extra is supported and
 tested — the parquet/csv tests skip themselves rather than failing, so a consumer that only
 resolves paths can still run the suite.
 
