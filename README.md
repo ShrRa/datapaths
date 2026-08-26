@@ -2,29 +2,32 @@
 
 [![tests](https://github.com/ShrRa/datapaths/actions/workflows/ci.yml/badge.svg)](https://github.com/ShrRa/datapaths/actions/workflows/ci.yml)
 
-A package for managing datasets (paths, names, versions, provenance) for small-scale 
-data analysis and ML projects. Includes functionality for root-relative path resolution 
-and managing a small hashed artifact registry. 
+A small package for managing datasets — paths, names, versions, provenance — in data
+analysis and ML projects. It resolves root-relative paths and keeps a hashed artifact
+registry.
 
-Separation of concerns principle: the data analysis repo should know only *which* dataset
-it uses, not not *where on this particular machine* that dataset sits. `datapaths` splits 
-those apart. A committed registry names artifacts and records their hashes; an uncommitted, 
-machine-local roots file says where the storage actually is. The same notebook then runs 
-on a laptop and on a shared cluster node without an edit.
+**The idea:** your analysis repo should know only *which* dataset it uses, not *where on
+this particular machine* that dataset sits. `datapaths` splits those apart. A committed
+registry names artifacts and records their hashes; an uncommitted, machine-local roots file
+says where the storage actually is. The same notebook then runs on your laptop and on a
+shared cluster node without an edit.
 
 ```python
 from datapaths import Datapaths
 
 dp = Datapaths()
-path = dp["features_train_v02"]          # -> absolute Path on this machine
+
+path = dp["features_train_dr2_v02"]      # -> absolute Path on this machine
 df   = pd.read_parquet(path)             # datapaths resolves and records; you read
 
-dp.save(df, name="features_train_v03", type="features", fmt="parquet",
-        tags=["v03", "bazin"], updated_by="Jay Doe", 
-        notes="after the renaming the columns") # let your colleagues know WTH you did with this data
+dp.save(df, name="features_train_dr2_v03", type="features", fmt="parquet",
+        tags=["v03", "bazin"], updated_by="Jay Doe",
+        notes="after renaming the columns")   # so colleagues know what this file is
 
-dp.print_paths(tag=['features','supernovae', 'v18']) # inspect all weird files accumulated during the project
+dp.print_paths(tag="v03")                # inspect what accumulated during the project
 ```
+
+---
 
 ## Install
 
@@ -39,167 +42,177 @@ pip install -e /path/to/datapaths
 pip install "datapaths @ git+https://github.com/ShrRa/datapaths.git@main"
 ```
 
+Add the `tabular` extra if the project saves or loads parquet/csv artifacts:
+
+```bash
+pip install "datapaths[tabular] @ git+https://github.com/ShrRa/datapaths.git@main"
+```
+
 In a consuming project, put the git form in `pyproject.toml` and it resolves like any other
 dependency. Pin `@main` to always track the tip, or `@v0.2.0` / `@<sha>` where a project
 needs to be reproducible — you get versioning only where you actually want it.
 
-Add the `tabular` extra if the project saves or loads parquet/csv artifacts:
-`pip install "datapaths[tabular] @ git+..."`.
+---
 
-## The two config files
+## Setup
+
+Two files, both under `configs/` in your project by default.
 
 **`configs/roots.local.yaml`** — machine-local, **never committed**. Maps root names to
-absolute paths:
-
-```yaml
-data: /mnt/beegfs/scratch/grumpy_hippo/var_stars/data
-features: /mnt/beegfs/scratch/grumpy_hippo/var_stars/features
-models: /mnt/beegfs/scratch/grumpy_hippo/var_stars/models
-predictions: /mnt/beegfs/scratch/grumpy_hippo/var_stars/predictions
-misc: /mnt/beegfs/scratch/grumpy_hippo/var_stars/misc
-```
-
-**`configs/artifacts_registry.yaml`** — committed. One record per artifact (catalog, ML model, etc): 
-its relative path under a root, format, sha256, tags, notes, timestamps. This is the file that makes an
-artifact reference mean the same thing to two people.
-
-Both are found relative to the repository root, which is discovered by walking up from the
-current working directory looking for `pyproject.toml` or `.git`.
-
-## Adding a root
-
-There is no command for this — a root is one line of YAML, and `roots.local.yaml` is
-uncommitted and machine-local by design, so it is meant to be edited by hand.
-
-Say you want somewhere to put plots. Create the directory, add it to the roots file:
+absolute directories:
 
 ```yaml
 data: /mnt/scratch/var_stars/data
 features: /mnt/scratch/var_stars/features
-plots: /mnt/scratch/var_stars/plots     # new
+models: /mnt/scratch/var_stars/models
+predictions: /mnt/scratch/var_stars/predictions
+misc: /mnt/scratch/var_stars/misc
 ```
 
-and that is the whole setup. A type with no entry in `TYPE_TO_ROOT` falls back to a root of
-the same name, so the new root is usable immediately:
+**`configs/artifacts_registry.yaml`** — committed. One record per artifact: its path under a
+root, format, sha256, tags, notes, timestamps. This is the file that makes an artifact
+reference mean the same thing to two people. You never write it by hand — `save` and
+`register` maintain it.
+
+Both are found relative to the repository root, discovered by walking up from the current
+working directory looking for `pyproject.toml` or `.git`. If that guess is ever wrong (a
+notebook or a scheduled job started elsewhere), set `DATAPATHS_REPO_ROOT` — see
+[docs/configuration.md](docs/configuration.md).
+
+---
+
+## Usage
+
+There are only a handful of things to know.
+
+### Resolve a path
+
+Subscripting takes either an artifact name or a root name and gives you an absolute `Path`:
 
 ```python
 dp = Datapaths()
-dp["plots"]                                              # the directory itself
+
+dp["features_train_dr2_v02"]   # an artifact -> /mnt/scratch/.../features_train_dr2_v02.parquet
+dp["features"]                 # a root      -> /mnt/scratch/var_stars/features
+dp["root_features"]            # force the root, even if an artifact shares the name
+```
+
+A missing key raises `KeyError`, and if you only got the capitalization wrong it says so.
+
+### Read an artifact's metadata
+
+```python
+dp.get("features_train_dr2_v02")                    # the whole record as a dict
+dp.get("features_train_dr2_v02", field="notes")     # one field
+dp.get("features_train_dr2_v02", field="hash")
+dp.get("nope", default={})                          # no exception, unlike dp["nope"]
+```
+
+### Save an object
+
+`save` serializes, writes atomically, hashes the result and updates the registry:
+
+```python
+dp.save(df, name="features_train_dr2_v03", type="features", fmt="parquet",
+        tags=["v03", "bazin"],
+        inputs=["lightcurves_dr2"],       # provenance: what this was built from
+        notes="dropped the saturated epochs",
+        updated_by="Jay Doe")
+```
+
+Formats it can write: `parquet`, `csv`, `json`, `bin` (bytes), `pickle`.
+
+Saving over an existing artifact archives the old file rather than deleting it. Saving
+something byte-identical with identical metadata is skipped with a warning.
+
+> **Naming note:** `type="features"` nests files under a family directory and requires a
+> name with at least four underscore-separated parts
+> (`family_split_sourceVer_catVer`). Every other type is written flat as `{name}.{ext}` with
+> no name check. Pass `force_flat_layout=True` or an explicit `relpath=` to opt out. See
+> [docs/artifact-types.md](docs/artifact-types.md).
+
+### Register a file that already exists
+
+`register` does not serialize anything — it records a path, a hash and metadata — so it
+accepts **any format label**. A FITS cube, an HDF5 model or a PDF works:
+
+```python
+dp.register(name="lc_cube", type="misc", fmt="fits",
+            src_path="/mnt/scratch/misc/cubes/lc.fits")
+
+dp["lc_cube"]                   # now resolves like anything else
+```
+
+By default the file is adopted where it lies (it must already be under one of the roots).
+Pass `copy_into_canonical=True` to copy it into the canonical layout instead — details in
+[docs/registering.md](docs/registering.md).
+
+### Find things
+
+`list` returns matching records as dicts, newest first. All filters combine with AND:
+
+```python
+dp.list(type="features")
+dp.list(tag=["v03", "bazin"])       # both tags required
+dp.list(name="train")               # substring match on the name
+dp.list(text="saturated")           # substring match on name or notes
+```
+
+### Print a table
+
+`print_paths` takes the same filters and prints an aligned table with resolved absolute
+paths — the quickest way to see what a project has accumulated:
+
+```python
+dp.print_paths(type="features")
+dp.print_paths(tag="v03", columns=["name", "path", "notes"])
+```
+
+```
+name                     | path                                        | tags
+-------------------------+---------------------------------------------+-----------
+features_train_dr2_v03   | /mnt/scratch/var_stars/features/features/... | v03,bazin
+features_test_dr2_v03    | /mnt/scratch/var_stars/features/features/... | v03,bazin
+```
+
+Default columns are `name`, `path`, `tags`, `type`, `updated at`; pass `columns=` to pick
+any fields from the record.
+
+### Check nothing drifted
+
+`verify` re-hashes what is on disk against what the registry claims, so an artifact that was
+regenerated without being re-registered is caught rather than quietly used:
+
+```python
+dp.verify(type="features")
+dp.verify(names=["lc_cube"])
+```
+
+Each result carries a `status` of `OK`, `MISSING`, `HASH_MISMATCH`, or `ROOT_MISSING`.
+
+### Add a new kind of artifact
+
+Add one line to `roots.local.yaml` — there is no command, because the file is machine-local
+by design:
+
+```yaml
+plots: /mnt/scratch/var_stars/plots     # new
+```
+
+A type with no built-in mapping falls back to a root of the same name, so `type="plots"`
+works immediately with no code change:
+
+```python
 dp.save(png_bytes, name="lc_grid", type="plots", fmt="bin")
 dp.list(type="plots")
-dp.verify(type="plots")
 ```
 
-Two details worth knowing:
-
-* **`type` is not a closed vocabulary.** The `ArtifactType` `Literal` names the built-in
-  types for editors and type checkers; it is never enforced at runtime, and any string
-  works. `TYPE_TO_ROOT` exists only for types whose root is *not* a root of the same name
-  (`dataprep` stores under `data`), and it takes precedence over the fallback — so defining
-  a `dataprep` root will not move existing `dataprep` artifacts.
-* **Family nesting is features-only.** An artifact of a custom type is written flat as
-  `{name}.{ext}`; only `type="features"` nests under `{family}/`. Pass `relpath=` if you
-  want a different arrangement.
-
-Every root must exist on disk and be an absolute path. If the type has no matching root the
-error names the file to edit and lists the types and roots it does know about.
-
-Root names are matched **exactly** — `dp["FEATURES"]` will not find a root called
-`features`, though the error says so and suggests the near miss. Three things about a roots
-file draw a `ConfigWarning` without refusing to load it: two names differing only in case,
-two names pointing at the same directory (checked with `samefile`, so a symlink or a
-case-insensitive filesystem counts), and two paths differing only in case where nothing on
-disk can settle whether they are one directory. The middle one is the dangerous case —
-artifacts of both roots share a tree, so two records can resolve to the same file and
-overwrite each other while `verify` reports both `OK`.
-
-Note the roots file has **no top-level wrapper key** — the entries sit at the top level.
-(The registry file does nest everything under `artifacts:`, which makes this an easy
-mistake.) An entry that isn't a name mapped to a single path is skipped with a
-`ConfigWarning` naming it; if that leaves no roots at all, `load_roots` raises rather than
-handing back an empty mapping that would fail later as an unexplained `KeyError`.
-
-## Overriding where the config files live
-
-The `configs/` names above are a default, not a requirement. Three environment variables
-override them, so a repository that organises itself differently — or a job whose working
-directory is somewhere else entirely — does not have to change any call site:
-
-| Variable | Effect |
-|---|---|
-| `DATAPATHS_REPO_ROOT` | Use this directory as the repository root instead of discovering one |
-| `DATAPATHS_ROOTS_FILE` | Path to the roots file |
-| `DATAPATHS_REGISTRY_FILE` | Path to the registry file |
-
-The two file variables accept either an absolute path (used as-is) or a path relative to the
-repo root (resolved against it).
-
-```bash
-export DATAPATHS_REPO_ROOT=/home/grumpy_hippo/Data/Work/Github/var_stars_project
-export DATAPATHS_ROOTS_FILE=etc/roots.yaml            # relative to the repo root
-export DATAPATHS_REGISTRY_FILE=/shared/registry.yaml  # absolute
-```
-
-Precedence, per setting, is: **explicit argument → environment variable → default**.
-
-```python
-Datapaths()                                  # env vars, else configs/ defaults
-Datapaths(repo_root=Path("/some/repo"))      # pins the root, env still fills the filenames
-Datapaths(registry_file="etc/registry.yaml") # pins the registry, ignores its env var
-```
-
-An argument you pass is never overridden by an environment variable that happens to be set
-in the shell — a caller that names a file means it.
-
-`DATAPATHS_REPO_ROOT` is the one worth setting habitually. Root discovery starts from the
-*working directory*, so a notebook, a scheduled job, or a shell started in the wrong place
-will otherwise silently resolve against whichever repository happens to be above it.
-
-## Registering a file this package cannot write
-
-`save` serializes, so it only accepts `parquet`, `csv`, `json`, `bin`, `pickle`. `register`
-does not serialize anything — it records a path, a hash and metadata — so it takes **any
-format label**. A FITS cube, an HDF5 model or a PDF is registered, resolved and verified
-like anything else:
-
-```python
-dp.register(name="lc_cube", type="misc", src_path="/mnt/scratch/misc/cubes/lc.fits",
-            fmt="fits")
-dp["lc_cube"]          # resolves
-dp.verify(names=["lc_cube"])   # re-hashes, reports drift
-```
-
-`datapaths register --fmt fits` works too; the CLI is not stricter than the API.
-
-### `src_path` vs `relpath`
-
-They are the two ends of a copy, and which one matters depends on
-`copy_into_canonical`:
-
-* **`src_path`** — where the file is *now*. Absolute, or relative to your cwd. It must
-  exist, and it is never moved.
-* **`relpath`** — where the file should sit *inside the root*, and the `path` recorded in
-  the registry. It overrides the canonical `{family}/{name}.{ext}` layout.
-
-|                                      | `relpath` given                | no `relpath`                             |
-| ------------------------------------ | ------------------------------ | ---------------------------------------- |
-| **in place** (the default)           | ignored, with a warning        | path is the file's existing location     |
-| **`copy_into_canonical=True`**       | the destination, verbatim      | destination from `canonical_relpath`     |
-
-Registering **in place** adopts the file exactly where it lies, so the record simply
-describes it — which is why no extension has to be known, and why any format works. The
-file must already be under one of the roots.
-
-Registering **with `copy_into_canonical=True`** copies it to a canonical name, so an
-extension *is* needed. For a format with no saver it is taken from the source file's own
-suffix, so `incoming.fits` registered as `cube` becomes `cube.fits`. A known format still
-uses the standard mapping (`pickle` → `.pkl`) rather than the suffix. If the format is
-unknown *and* the source has no suffix, nothing can name the destination and it is refused
-— pass `relpath` to say what you want.
+---
 
 ## CLI
 
-Installed as `datapaths`:
+The package is primarily meant to be used from Python, but a `datapaths` command is
+installed for quick checks from a shell:
 
 ```bash
 datapaths list --type features --tag v02
@@ -208,45 +221,37 @@ datapaths verify --type features          # re-hash and report drift
 datapaths register --name my_table --type features --file /tmp/x.parquet --fmt parquet
 ```
 
-`verify` is the one that earns its keep: it re-hashes what is on disk against what the
-registry claims, so an artifact that was regenerated without being re-registered is caught
-rather than quietly used.
+Output is JSON. The CLI is not stricter than the API — `--fmt fits` works too.
 
-## Layout
+---
 
-| Module | Responsibility |
+## What it guarantees
+
+Artifact writes go through a staging file and an atomic move, and registry updates take a
+`filelock`, so a crashed or concurrent run does not leave a half-written artifact or a
+corrupted registry. Overwriting a registered artifact moves the old file into `_archive/`
+under a name carrying its timestamp and short hash rather than deleting it. Details in
+[docs/architecture.md](docs/architecture.md).
+
+## Documentation
+
+| Page | Contents |
 |---|---|
-| `datapaths.py` | The `Datapaths` class — resolve, load, save, register, list, verify |
-| `config.py` | Repo-root discovery, env overrides, roots file |
-| `registry.py` | Read/write the registry YAML under a file lock |
-| `artifacts.py` | Canonical relative paths, atomic writes, archiving |
-| `hashing.py` | sha256 of files and bytes |
-| `cli.py` | `datapaths` command |
-| `exceptions.py` | `DatapathsError` and friends |
+| [docs/configuration.md](docs/configuration.md) | Config files, env overrides, precedence, collision warnings |
+| [docs/artifact-types.md](docs/artifact-types.md) | Types, roots, and the features naming convention |
+| [docs/registering.md](docs/registering.md) | `register` vs `save`, `src_path` vs `relpath` |
+| [docs/architecture.md](docs/architecture.md) | Modules, atomicity, locking, archiving |
 
-Writes go through a temp file and `Path.replace`, and registry updates take a `filelock`, so
-a crashed or concurrent run does not leave a half-written artifact or a corrupted registry.
-Overwriting a registered artifact moves the old file into `_archive/` under a name carrying
-its timestamp and short hash rather than deleting it.
-
-## Tests
+## Contributing
 
 ```bash
 pip install -e ".[tabular,dev]"
 pytest
 ```
 
-256 tests, about four seconds. CI runs them on Linux, macOS and Windows against Python
-3.10, 3.12 and 3.14, plus one job without the `tabular` extra — the parquet/csv tests skip
-themselves there rather than failing, so a consumer that only resolves paths can still run
-the suite.
+CI runs the suite on Linux, macOS and Windows against Python 3.10, 3.12 and 3.14, plus one
+job without the `tabular` extra. See [AGENTS.md](AGENTS.md) for the invariants to preserve.
 
-Two of them are worth knowing about, because they fail loudly if the protection they cover
-is ever removed:
+## License
 
-* `test_registry_concurrency.py` runs two processes appending to one registry and checks
-  that neither loses the other's entries. With the `filelock` removed it does not merely
-  drop records — it leaves the registry as unparseable YAML.
-* `test_save.py::TestAtomicity` interrupts a write part-way and asserts nothing is left
-  behind. Staging temp files that outlive a failed write accumulate invisibly in the data
-  root.
+MIT.

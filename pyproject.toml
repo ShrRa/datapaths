@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Needed only by save()/load() for the "parquet" and "csv" formats.
+# Needed only by save() for the "parquet" and "csv" formats.
 tabular = [
   "pandas>=2.0",
   "pyarrow>=14.0",
