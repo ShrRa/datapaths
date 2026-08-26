@@ -47,11 +47,19 @@ def now_iso() -> str:
 
 def canonical_relpath(
     name: str,
-    fmt: Format,
+    fmt: Format | str,
     *,
     layout: Literal["one_level_family", "flat"] = "one_level_family",
     enforce_family_naming: bool = False,
+    fallback_ext: str | None = None,
 ) -> Path:
+    """Build the canonical path for an artifact.
+
+    `fallback_ext` supplies an extension for a format this package cannot
+    write, which is how register() adopts a FITS cube or an HDF5 model: the
+    format has no saver, but the file on disk already carries a suffix that
+    says what it is, and the canonical name should keep matching it.
+    """
     parts = name.split("_")
 
     ext_map = {
@@ -61,9 +69,14 @@ def canonical_relpath(
         "bin": "bin",
         "pickle": "pkl",
     }
-    ext = ext_map.get(fmt)
-    if ext is None:
-        raise ArtifactError(f"Unsupported format: {fmt}")
+    ext = ext_map.get(fmt) or (fallback_ext or "").lstrip(".")
+    if not ext:
+        raise ArtifactError(
+            f"Unsupported format: {fmt}. Formats this package can write are "
+            f"{', '.join(sorted(ext_map))}; any other format can still be "
+            f"registered, but the file needs a suffix to name it by, or an "
+            f"explicit relpath."
+        )
 
     filename = f"{name}.{ext}"
 

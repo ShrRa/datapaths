@@ -22,7 +22,7 @@ from .artifacts import (
     write_tabular,
 )
 from .config import DatapathsConfig, load_config, load_roots
-from .exceptions import ArtifactError
+from .exceptions import ArtifactError, ArtifactWarning
 from .hashing import sha256_file
 from .registry import Registry, read_registry, update_registry_atomic
 
@@ -262,7 +262,7 @@ class Datapaths:
         name: str,
         type: ArtifactType | str,
         src_path: str,
-        fmt: Format,
+        fmt: Format | str,
         root_key: str | None = None,
         relpath: str | None = None,
         tags: list[str] | None = None,
@@ -277,22 +277,25 @@ class Datapaths:
         self.reload()
         rk = self._resolve_root(type, root_key)
 
-        layout: Literal["one_level_family", "flat"] = (
-            "flat" if (force_flat_layout or type != "features") else "one_level_family"
-        )
-        rel = Path(relpath) if relpath else canonical_relpath(
-            name,
-            fmt,
-            layout=layout,
-            enforce_family_naming=(type == "features" and layout == "one_level_family"),
-        )
-        dst = self.roots[rk] / rel
-
         src = Path(src_path).expanduser().resolve()
         if not src.exists():
             raise ArtifactError(f"Source path does not exist: {src}")
 
         if copy_into_canonical:
+            layout: Literal["one_level_family", "flat"] = (
+                "flat" if (force_flat_layout or type != "features") else "one_level_family"
+            )
+            # A format with no saver still names a real file: borrow the
+            # source's own suffix so the canonical name keeps matching it.
+            rel = Path(relpath) if relpath else canonical_relpath(
+                name,
+                fmt,
+                layout=layout,
+                enforce_family_naming=(type == "features" and layout == "one_level_family"),
+                fallback_ext=src.suffix,
+            )
+            dst = self.roots[rk] / rel
+
             if dst.exists():
                 if not overwrite:
                     raise ArtifactError(f"Destination exists: {dst}")
@@ -307,15 +310,27 @@ class Datapaths:
             shutil.copy2(str(src), str(dst))
             final_path = dst
         else:
+            # Registering in place: the file stays where it is, so its own
+            # location IS the record. No canonical path is built here, which is
+            # also why a format this package cannot write is fine -- nothing
+            # needs to know an extension for it.
+            if relpath is not None:
+                warnings.warn(
+                    f"relpath={relpath!r} is ignored when registering in place: "
+                    f"'{name}' is recorded where the file already sits. Pass "
+                    f"copy_into_canonical=True to move it to that path instead.",
+                    ArtifactWarning,
+                    stacklevel=2,
+                )
             final_path = src
             try:
-                final_rel = final_path.relative_to(self.roots[rk])
+                rel = final_path.relative_to(self.roots[rk])
             except Exception as e:
                 raise ArtifactError(
-                    "Source file is not under the configured root. "
-                    "Use copy_into_canonical=True or adjust roots.local.yaml."
+                    f"Source file is not under the '{rk}' root "
+                    f"({self.roots[rk]}): {src}. Use copy_into_canonical=True "
+                    f"to copy it in, or adjust {self.cfg.roots_file}."
                 ) from e
-            rel = final_rel
 
         h = sha256_file(final_path)
 

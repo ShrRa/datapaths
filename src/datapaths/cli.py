@@ -25,7 +25,13 @@ def main() -> None:
     p_reg.add_argument("--name", required=True)
     p_reg.add_argument("--type", required=True)
     p_reg.add_argument("--file", required=True)
-    p_reg.add_argument("--fmt", required=True, choices=["parquet", "csv", "json", "bin", "pickle"])
+    # No choices: register records a file it does not have to write, so any
+    # format label is legitimate here (fits, hdf5, pdf). save() is where the
+    # vocabulary is genuinely closed.
+    p_reg.add_argument(
+        "--fmt", required=True,
+        help="format label, e.g. parquet, csv, json, bin, pickle, or any other (fits, hdf5, ...)",
+    )
     p_reg.add_argument("--tag", action="append", default=[])
     p_reg.add_argument("--notes", default="")
     p_reg.add_argument("--copy-into-canonical", action="store_true")

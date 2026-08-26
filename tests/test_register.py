@@ -37,8 +37,13 @@ class TestInPlace:
         assert not rec["path"].startswith("/")
 
     def test_a_file_outside_every_root_is_refused(self, dp, outside):
-        with pytest.raises(ArtifactError, match="not under the configured root"):
+        with pytest.raises(ArtifactError, match="not under the 'features' root"):
             dp.register(name="a_b_c_d", type="features", src_path=str(outside), fmt="parquet")
+
+    def test_that_error_names_the_file_and_the_way_out(self, dp, outside):
+        with pytest.raises(ArtifactError, match="copy_into_canonical=True") as exc:
+            dp.register(name="a_b_c_d", type="features", src_path=str(outside), fmt="parquet")
+        assert str(outside) in str(exc.value)
 
     def test_missing_source_raises(self, dp, tmp_path):
         with pytest.raises(ArtifactError, match="does not exist"):

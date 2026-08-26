@@ -104,11 +104,15 @@ class TestFailureModes:
     def test_no_subcommand_exits_nonzero(self, repo):
         assert run(repo, expect_ok=False).returncode != 0
 
-    def test_unknown_format_is_rejected_by_argparse(self, repo):
-        proc = run(repo, "register", "--name", "x", "--type", "misc",
-                   "--file", "/tmp/x", "--fmt", "zarr", expect_ok=False)
-        assert proc.returncode != 0
-        assert "invalid choice" in proc.stderr
+    def test_an_unwritable_format_is_accepted_for_register(self, repo):
+        """The CLI must not be stricter than the API it wraps."""
+        src = repo.roots["misc"] / "image.fits"
+        src.write_bytes(b"SIMPLE  =  T")
+        rec = json.loads(
+            run(repo, "register", "--name", "cube", "--type", "misc",
+                "--file", str(src), "--fmt", "fits").stdout
+        )
+        assert rec["format"] == "fits"
 
     def test_missing_source_reports_the_error(self, repo):
         proc = run(repo, "register", "--name", "x", "--type", "misc",

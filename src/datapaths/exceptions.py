@@ -12,3 +12,6 @@ class ArtifactError(DatapathsError):
 
 class ConfigWarning(UserWarning):
     """A config file was usable, but part of it was not."""
+
+class ArtifactWarning(UserWarning):
+    """An artifact operation succeeded, but not quite as asked."""
