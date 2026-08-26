@@ -19,7 +19,14 @@ jobs:
       # Windows is exactly what this matrix is for.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Ubuntu alone on a push; all three on a pull request or a manual run.
+        #
+        # This repo is private, where GitHub bills macOS at 10x and Windows at
+        # 2x, so the full matrix costs real money on every commit while Ubuntu
+        # costs pennies. A platform bug is worth catching before a merge, not on
+        # every intermediate push. Revert to the plain three-OS list once the
+        # repo is public and all runners are free.
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
         # The floor and the ceiling of what pyproject claims, plus one between.
         # 3.10 is here because declaring requires-python >= 3.10 without testing
         # it is a guess.
