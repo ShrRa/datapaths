@@ -14,7 +14,7 @@ from datapaths import Datapaths
 
 dp = Datapaths()
 path = dp["features_train_v02"]          # -> absolute Path on this machine
-df   = dp.load("features_train_v02")     # or read it directly
+df   = pd.read_parquet(path)             # datapaths resolves and records; you read
 
 dp.save(df, name="features_train_v03", type="features", fmt="parquet",
         tags=["v03", "bazin"], notes="after the CC-1 rename")
