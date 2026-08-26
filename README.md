@@ -98,6 +98,15 @@ Two details worth knowing:
 Every root must exist on disk and be an absolute path. If the type has no matching root the
 error names the file to edit and lists the types and roots it does know about.
 
+Root names are matched **exactly** — `dp["FEATURES"]` will not find a root called
+`features`, though the error says so and suggests the near miss. Three things about a roots
+file draw a `ConfigWarning` without refusing to load it: two names differing only in case,
+two names pointing at the same directory (checked with `samefile`, so a symlink or a
+case-insensitive filesystem counts), and two paths differing only in case where nothing on
+disk can settle whether they are one directory. The middle one is the dangerous case —
+artifacts of both roots share a tree, so two records can resolve to the same file and
+overwrite each other while `verify` reports both `OK`.
+
 Note the roots file has **no top-level wrapper key** — the entries sit at the top level.
 (The registry file does nest everything under `artifacts:`, which makes this an easy
 mistake.) An entry that isn't a name mapped to a single path is skipped with a
@@ -221,7 +230,7 @@ pip install -e ".[tabular,dev]"
 pytest
 ```
 
-239 tests, about four seconds. Installing without the `tabular` extra is supported and
+256 tests, about four seconds. Installing without the `tabular` extra is supported and
 tested — the parquet/csv tests skip themselves rather than failing, so a consumer that only
 resolves paths can still run the suite.
 

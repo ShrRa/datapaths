@@ -113,6 +113,69 @@ def load_config(
     )
 
 
+def _warn_on_colliding_roots(roots: dict[str, Path], roots_file: Path) -> None:
+    """Flag roots that are harder to tell apart than their names suggest.
+
+    Two separate checks, and only the second is a correctness matter:
+
+    * Names differing only in case. Lookup is exact, so these really are two
+      roots and nothing breaks -- but dp["Features"] then fails while
+      "features" exists, and tags are lowercased everywhere else, so the
+      inconsistency invites a typo that surfaces as a bare KeyError.
+    * Two names pointing at one directory. This one bites: both roots build
+      canonical paths under the same tree, so two artifacts can land on the
+      same file and archive over each other, and verify calls both OK until
+      they do. samefile() settles it whatever the cause -- an identical path, a
+      symlink, a bind mount, or a case-insensitive filesystem.
+    """
+    by_fold: dict[str, list[str]] = {}
+    for name in roots:
+        by_fold.setdefault(name.casefold(), []).append(name)
+    for group in by_fold.values():
+        if len(group) > 1:
+            warnings.warn(
+                f"Root names differing only in case in {roots_file}: "
+                f"{', '.join(repr(g) for g in sorted(group))}. Lookup is exact, so "
+                f"these are separate roots -- but a lookup that gets the case wrong "
+                f"fails rather than falling back. Rename one unless the distinction "
+                f"is deliberate.",
+                ConfigWarning,
+                stacklevel=3,
+            )
+
+    names = sorted(roots)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            pa, pb = roots[a], roots[b]
+            same = pa == pb
+            if not same and pa.exists() and pb.exists():
+                try:
+                    same = pa.samefile(pb)
+                except OSError:
+                    same = False
+            if same:
+                warnings.warn(
+                    f"Roots {a!r} and {b!r} in {roots_file} are the same directory "
+                    f"({pa}). Artifacts of both will share one tree, so two records "
+                    f"can resolve to the same file and overwrite each other with no "
+                    f"warning from verify.",
+                    ConfigWarning,
+                    stacklevel=3,
+                )
+            elif str(pa).casefold() == str(pb).casefold() and not (
+                pa.exists() and pb.exists()
+            ):
+                # Both existing and not samefile would have proved them distinct;
+                # since at least one is absent, only the filesystem can say.
+                warnings.warn(
+                    f"Roots {a!r} and {b!r} in {roots_file} have paths differing only "
+                    f"in case ({pa}, {pb}). On a case-insensitive filesystem these are "
+                    f"one directory, and artifacts of both would share it.",
+                    ConfigWarning,
+                    stacklevel=3,
+                )
+
+
 def load_roots(cfg: DatapathsConfig) -> dict[str, Path]:
     if not cfg.roots_file.exists():
         raise ConfigError(
@@ -152,4 +215,6 @@ def load_roots(cfg: DatapathsConfig) -> dict[str, Path]:
             ConfigWarning,
             stacklevel=2,
         )
+
+    _warn_on_colliding_roots(roots, cfg.roots_file)
     return roots

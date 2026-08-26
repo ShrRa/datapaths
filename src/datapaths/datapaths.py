@@ -58,11 +58,25 @@ class Datapaths:
         self.roots = load_roots(self.cfg)
         self.catalogues = read_registry(self.cfg.registry_file).artifacts
 
+    def _missing_key(self, key: str, *, roots_only: bool = False) -> KeyError:
+        """Build the KeyError, naming a case-insensitive near miss if there is one.
+
+        Root names are matched exactly and tags are lowercased everywhere else,
+        so getting the case wrong is the likeliest way to land here -- and a
+        bare KeyError leaves the caller comparing strings by eye.
+        """
+        candidates = list(self.roots) if roots_only else [*self.roots, *self.catalogues]
+        folded = key.casefold()
+        near = [c for c in candidates if c.casefold() == folded]
+        if near:
+            return KeyError(f"{key!r}; did you mean {near[0]!r}? (matching is case-sensitive)")
+        return KeyError(key)
+
     def __getitem__(self, key: str) -> Path:
         if key.startswith("root_"):
             rk = key[5:]
             if rk not in self.roots:
-                raise KeyError(key)
+                raise self._missing_key(rk, roots_only=True)
             return self.roots[rk]
 
         if key in self.roots:
@@ -70,7 +84,7 @@ class Datapaths:
 
         rec = self.catalogues.get(key)
         if rec is None:
-            raise KeyError(key)
+            raise self._missing_key(key)
         return self._absolute_from_record(rec)
 
     def get(self, key: str, default: Any = None, *, field: str | None = None) -> Any:
