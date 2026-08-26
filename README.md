@@ -1,5 +1,7 @@
 # datapaths
 
+[![tests](https://github.com/ShrRa/datapaths/actions/workflows/ci.yml/badge.svg)](https://github.com/ShrRa/datapaths/actions/workflows/ci.yml)
+
 Root-relative path resolution and a small hashed artifact registry, for data-analysis
 repositories where the data does not live next to the code.
 
@@ -230,9 +232,10 @@ pip install -e ".[tabular,dev]"
 pytest
 ```
 
-256 tests, about four seconds. Installing without the `tabular` extra is supported and
-tested — the parquet/csv tests skip themselves rather than failing, so a consumer that only
-resolves paths can still run the suite.
+256 tests, about four seconds. CI runs them on Linux, macOS and Windows against Python
+3.10, 3.12 and 3.14, plus one job without the `tabular` extra — the parquet/csv tests skip
+themselves there rather than failing, so a consumer that only resolves paths can still run
+the suite.
 
 Two of them are worth knowing about, because they fail loudly if the protection they cover
 is ever removed:

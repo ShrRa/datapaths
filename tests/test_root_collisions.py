@@ -75,7 +75,10 @@ class TestSameDirectory:
         real = tmp_path / "real"
         real.mkdir()
         link = tmp_path / "link"
-        link.symlink_to(real, target_is_directory=True)
+        try:
+            link.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlink creation not permitted on this platform")
         repo.write_roots({"features": real, "plots": link})
         with pytest.warns(ConfigWarning, match="same directory"):
             repo.dp()
@@ -91,9 +94,11 @@ class TestSameDirectory:
         samefile says so -- no warning is warranted."""
         lower, upper = tmp_path / "data", tmp_path / "DATA"
         lower.mkdir()
-        upper.mkdir()
+        # exist_ok, because on a case-insensitive filesystem this IS lower --
+        # a plain mkdir would raise FileExistsError before samefile could say so.
+        upper.mkdir(exist_ok=True)
         if lower.samefile(upper):
-            pytest.skip("case-insensitive filesystem")
+            pytest.skip("case-insensitive filesystem: they are one directory")
         repo.write_roots({"a_root": lower, "b_root": upper})
         repo.dp()
         assert config_warnings(recwarn) == []

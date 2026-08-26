@@ -171,7 +171,7 @@ class Datapaths:
         same_metadata = bool(existing) and (
             existing.get("type") == type
             and existing.get("root") == rk
-            and existing.get("path") == str(rel)
+            and existing.get("path") == rel.as_posix()
             and existing.get("format") == fmt
             and sorted(normalize_tags(existing.get("tags"))) == wanted_tags
             and list(existing.get("inputs", [])) == wanted_inputs
@@ -209,7 +209,7 @@ class Datapaths:
                     return dict(existing) if existing else {
                         "type": type,
                         "root": rk,
-                        "path": str(rel),
+                        "path": rel.as_posix(),
                         "format": fmt,
                         "hash": old_hash,
                         "tags": wanted_tags,
@@ -230,7 +230,7 @@ class Datapaths:
                     archived_rec = {
                         "archived_at": now_iso(),
                         "hash": old_hash,
-                        "path": str(arch_path.relative_to(self.roots[rk])),
+                        "path": arch_path.relative_to(self.roots[rk]).as_posix(),
                         "notes": "auto-archived on overwrite",
                     }
                 else:
@@ -244,7 +244,11 @@ class Datapaths:
         record = {
             "type": type,
             "root": rk,
-            "path": str(rel),
+            # Recorded POSIX-style, always. The registry is committed and read
+            # on other machines; a Windows-written 'bazin\\f.parquet' would be
+            # one filename containing backslashes anywhere else. Path() accepts
+            # forward slashes on every platform, so reading stays unchanged.
+            "path": rel.as_posix(),
             "format": fmt,
             "updated_at": now_iso(),
             "updated_by": updated_by or os.environ.get("USER") or os.environ.get("USERNAME") or "unknown",
@@ -351,7 +355,11 @@ class Datapaths:
         record = {
             "type": type,
             "root": rk,
-            "path": str(rel),
+            # Recorded POSIX-style, always. The registry is committed and read
+            # on other machines; a Windows-written 'bazin\\f.parquet' would be
+            # one filename containing backslashes anywhere else. Path() accepts
+            # forward slashes on every platform, so reading stays unchanged.
+            "path": rel.as_posix(),
             "format": fmt,
             "updated_at": now_iso(),
             "updated_by": updated_by or os.environ.get("USER") or os.environ.get("USERNAME") or "unknown",
