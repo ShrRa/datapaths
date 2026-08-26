@@ -104,10 +104,18 @@ class TestSameDirectory:
         assert config_warnings(recwarn) == []
 
     def test_paths_differing_only_in_case_that_do_not_exist_warn(self, repo, tmp_path):
-        """Nothing on disk can settle it, so say what the risk is."""
+        """Nothing on disk can settle it, so say what the risk is.
+
+        Which of the two warnings fires is platform-dependent and both are
+        right: on Windows, Path comparison is case-insensitive, so these are
+        equal and the stronger "same directory" warning is the accurate one.
+        What must hold everywhere is that the pair is flagged at all.
+        """
         repo.write_roots({"a_root": tmp_path / "ghost", "b_root": tmp_path / "GHOST"})
-        with pytest.warns(ConfigWarning, match="differing only\\s+in case"):
+        with pytest.warns(ConfigWarning, match="Roots 'a_root' and 'b_root'") as record:
             repo.dp()
+        message = str(record[0].message)
+        assert "same directory" in message or "differing only" in message
 
 
 class TestLookupHint:

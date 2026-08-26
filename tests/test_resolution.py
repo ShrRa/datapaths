@@ -96,9 +96,16 @@ class TestGet:
 
     @pytest.mark.parametrize("field", ["path_abs", "absolute_path"])
     def test_path_abs_aliases_render_an_absolute_string(self, populated, field):
+        """An absolute path is for opening a file, so it uses native separators.
+
+        Only the *relative* path in the registry is POSIX, because that one
+        travels between machines. Comparing as Path rather than by string keeps
+        the distinction without asserting a separator.
+        """
         got = populated.dp().get("features_train_v02", field=field)
         assert Path(got).is_absolute()
-        assert got.endswith("features/features_train_v02.parquet")
+        expected = populated.roots["features"] / "features" / "features_train_v02.parquet"
+        assert Path(got) == expected.resolve()
 
     def test_named_field_falls_back_to_the_default(self, populated):
         dp = populated.dp()

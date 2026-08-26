@@ -59,7 +59,9 @@ class TestFormats:
 class TestLayout:
     def test_features_nest_under_their_family(self, dp, frame):
         rec = dp.save(frame, name="bazin_train_s01_c01", type="features")
-        assert rec["path"] == str(Path("bazin") / "bazin_train_s01_c01.parquet")
+        # POSIX literal, not str(Path(...)): the registry is committed and read
+        # on other machines, so the separator must not depend on the writer's.
+        assert rec["path"] == "bazin/bazin_train_s01_c01.parquet"
 
     def test_non_features_are_flat(self, dp):
         rec = dp.save({"a": 1}, name="a_b_c_d", type="misc", fmt="json")
