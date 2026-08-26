@@ -17,10 +17,10 @@ from datapaths import Datapaths
 
 dp = Datapaths()
 
-path = dp["features_train_dr2_v02"]      # -> absolute Path on this machine
+path = dp["features_train_v02"]      # -> absolute Path on this machine
 df   = pd.read_parquet(path)             # datapaths resolves and records; you read
 
-dp.save(df, name="features_train_dr2_v03", type="features", fmt="parquet",
+dp.save(df, name="features_train_v03", type="features", fmt="parquet",
         tags=["v03", "bazin"], updated_by="Jay Doe",
         notes="after renaming the columns")   # so colleagues know what this file is
 
@@ -92,7 +92,7 @@ Subscripting takes either an artifact name or a root name and gives you an absol
 ```python
 dp = Datapaths()
 
-dp["features_train_dr2_v02"]   # an artifact -> /mnt/scratch/.../features_train_dr2_v02.parquet
+dp["features_train_v02"]   # an artifact -> /mnt/scratch/.../features_train_v02.parquet
 dp["features"]                 # a root      -> /mnt/scratch/var_stars/features
 dp["root_features"]            # force the root, even if an artifact shares the name
 ```
@@ -102,9 +102,9 @@ A missing key raises `KeyError`, and if you only got the capitalization wrong it
 ### Read an artifact's metadata
 
 ```python
-dp.get("features_train_dr2_v02")                    # the whole record as a dict
-dp.get("features_train_dr2_v02", field="notes")     # one field
-dp.get("features_train_dr2_v02", field="hash")
+dp.get("features_train_v02")                    # the whole record as a dict
+dp.get("features_train_v02", field="notes")     # one field
+dp.get("features_train_v02", field="hash")
 dp.get("nope", default={})                          # no exception, unlike dp["nope"]
 ```
 
@@ -113,7 +113,7 @@ dp.get("nope", default={})                          # no exception, unlike dp["n
 `save` serializes, writes atomically, hashes the result and updates the registry:
 
 ```python
-dp.save(df, name="features_train_dr2_v03", type="features", fmt="parquet",
+dp.save(df, name="features_train_v03", type="features", fmt="parquet",
         tags=["v03", "bazin"],
         inputs=["lightcurves_dr2"],       # provenance: what this was built from
         notes="dropped the saturated epochs",
@@ -125,11 +125,16 @@ Formats it can write: `parquet`, `csv`, `json`, `bin` (bytes), `pickle`.
 Saving over an existing artifact archives the old file rather than deleting it. Saving
 something byte-identical with identical metadata is skipped with a warning.
 
-> **Naming note:** `type="features"` nests files under a family directory and requires a
-> name with at least four underscore-separated parts
-> (`family_split_sourceVer_catVer`). Every other type is written flat as `{name}.{ext}` with
-> no name check. Pass `force_flat_layout=True` or an explicit `relpath=` to opt out. See
-> [docs/artifact-types.md](docs/artifact-types.md).
+Every artifact is written flat as `{root}/{name}.{ext}`, whatever its type — `type` selects
+the root and nothing else. Pass `relpath=` when you want a subdirectory:
+
+```python
+dp.save(df, name="bazin_train", type="features", relpath="bazin/train.parquet")
+```
+
+Names are validated but not styled: they must be a single path component that stays inside
+the root, and must not start with `.` or `~`. Beyond that, name things however your project
+names things. See [docs/artifact-types.md](docs/artifact-types.md).
 
 ### Register a file that already exists
 
@@ -144,8 +149,12 @@ dp["lc_cube"]                   # now resolves like anything else
 ```
 
 By default the file is adopted where it lies (it must already be under one of the roots).
-Pass `copy_into_canonical=True` to copy it into the canonical layout instead — details in
-[docs/registering.md](docs/registering.md).
+Pass `copy_into_canonical=True` to copy it into the canonical layout instead.
+
+Registering a name that is **already in the registry** warns and does nothing, because a
+record carries archive history that cannot be rebuilt from disk. Pass
+`overwrite_history=True` to rewrite it deliberately. Details, and the separate
+`overwrite_file` flag, in [docs/registering.md](docs/registering.md).
 
 ### Find things
 
@@ -169,10 +178,10 @@ dp.print_paths(tag="v03", columns=["name", "path", "notes"])
 ```
 
 ```
-name                     | path                                        | tags
--------------------------+---------------------------------------------+-----------
-features_train_dr2_v03   | /mnt/scratch/var_stars/features/features/... | v03,bazin
-features_test_dr2_v03    | /mnt/scratch/var_stars/features/features/... | v03,bazin
+name               | path                                                          | notes
+-------------------+---------------------------------------------------------------+-----------------------------
+features_test_v03  | /mnt/scratch/var_stars/features/features_test_v03.parquet     | held-out split
+features_train_v03 | /mnt/scratch/var_stars/features/features_train_v03.parquet    | dropped the saturated epochs
 ```
 
 Default columns are `name`, `path`, `tags`, `type`, `updated at`; pass `columns=` to pick

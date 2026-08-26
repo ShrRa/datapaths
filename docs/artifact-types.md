@@ -1,5 +1,10 @@
 # Artifact types and roots
 
+## What `type` does
+
+A `type` selects **which root** an artifact is stored in, and nothing else. It has no effect
+on the path inside that root, and it is not validated against any list.
+
 ## Adding a root
 
 There is no command for this — a root is one line of YAML, and `roots.local.yaml` is
@@ -13,8 +18,8 @@ features: /mnt/scratch/var_stars/features
 plots: /mnt/scratch/var_stars/plots     # new
 ```
 
-and that is the whole setup. A type with no entry in `TYPE_TO_ROOT` falls back to a root of
-the same name, so the new root is usable immediately:
+and that is the whole setup. A type resolves to a root of the same name, so the new root is
+usable immediately:
 
 ```python
 dp = Datapaths()
@@ -24,50 +29,65 @@ dp.list(type="plots")
 dp.verify(type="plots")
 ```
 
-If the type has no matching root, the error names the file to edit and lists the types and
-roots it does know about.
+If the type has no matching root, the error names the file to edit and lists the roots it
+does know about.
 
 ## How a root is chosen
 
-`Datapaths` picks the storage root for an artifact in this order:
-
 1. An explicit `root_key=` argument.
-2. The built-in `TYPE_TO_ROOT` mapping.
+2. The `TYPE_TO_ROOT` mapping.
 3. A root named after the type itself.
+
+`TYPE_TO_ROOT` **ships empty**, so in practice step 3 does all the work. It exists as an
+escape hatch for a project that needs a type whose root has a different name:
+
+```python
+from datapaths.artifacts import TYPE_TO_ROOT
+TYPE_TO_ROOT["dataprep"] = "data"     # dataprep artifacts land in the data root
+```
+
+It takes precedence over the same-name fallback, so an entry here wins even if a root of the
+type's own name also exists.
 
 ## `type` is not a closed vocabulary
 
-The `ArtifactType` `Literal` names the built-in types for editors and type checkers:
+The `ArtifactType` `Literal` names some common types for editors and type checkers:
 
 ```python
 ArtifactType = Literal["data", "dataprep", "features", "predictions", "models", "misc"]
 ```
 
-It is **never enforced at runtime**, and any string works.
+It is **never enforced at runtime**, and any string works. It is a hint about what people
+usually pick, not a list of what is allowed.
 
-`TYPE_TO_ROOT` exists only for types whose root is *not* a root of the same name (`dataprep`
-stores under `data`), and it takes precedence over the fallback — so defining a `dataprep`
-root will not move existing `dataprep` artifacts.
+## Layout
 
-## Family nesting is features-only
+Every artifact is written flat, directly under its root:
 
-An artifact of any type other than `features` is written flat as `{name}.{ext}` directly
-under its root. Only `type="features"` nests under `{family}/`, where the family is the part
-of the name before the first underscore.
-
-`features` also **enforces a naming convention**: the name must have at least four
-underscore-separated parts, `family_split_sourceVer_catVer`.
-
-```python
-dp.save(df, name="features_train_dr2_v03", type="features", fmt="parquet")
-# -> <features root>/features/features_train_dr2_v03.parquet
-
-dp.save(df, name="features_train_v03", type="features", fmt="parquet")
-# ArtifactError: Name 'features_train_v03' must look like family_split_sourceVer_catVer
-#                (at least 4 underscore-separated parts).
+```
+{root}/{name}.{ext}
 ```
 
-Two ways out if that layout is not what you want:
+There are no per-type layouts. `type="features"` used to nest artifacts under a family
+directory taken from the first underscore-separated part of the name, and to require names
+of at least four such parts; both are gone. Pass `relpath=` when you want a specific
+arrangement:
 
-* `force_flat_layout=True` — write flat and skip the name check.
-* `relpath="..."` — say exactly where the file should sit inside the root.
+```python
+dp.save(df, name="bazin_train", type="features", relpath="bazin/train.parquet")
+```
+
+## Name rules
+
+The one thing a name must satisfy is that it can safely become a filename under a root. A
+name is rejected if it:
+
+* is empty or only whitespace,
+* contains `/` or `\` — a name is one path component; use `relpath=` to nest,
+* is `.` or `..`, or traverses out of the root,
+* starts with `.` — hidden files have no place in a provenance registry,
+* starts with `~`, which some tools expand to a home directory,
+* contains a control character.
+
+Everything else is allowed, including short names, names with no underscores, and names with
+dots or dashes inside them. Naming conventions are the project's business, not the library's.

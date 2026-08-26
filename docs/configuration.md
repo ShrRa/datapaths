@@ -97,3 +97,32 @@ Datapaths(registry_file="etc/registry.yaml") # pins the registry, ignores its en
 
 An argument you pass is never overridden by an environment variable that happens to be set
 in the shell — a caller that names a file means it.
+
+## Tags
+
+Tags are normalized on the way in and on the way out: every tag is stripped and lowercased,
+and a string containing commas is split into several tags.
+
+```python
+dp.save(df, name="x", type="misc", fmt="json", tags=["V02", " Bazin "])
+dp.get("x", field="tags")     # ['bazin', 'v02'] -- lowercased and sorted
+```
+
+Two consequences, both intended:
+
+* **A tag cannot contain a comma.** Commas are the separator, which is what makes
+  `--tag v02,bazin` on the CLI mean "both tags required" rather than one literal tag that
+  could never match anything.
+* **A tag cannot carry case.** `V02` and `v02` are the same tag. The registry is a committed
+  file that people read, so two entry points writing the same tag differently would make it
+  inconsistent with itself.
+
+Filtering normalizes the query the same way, so `tag="V02"` matches a stored `v02`. Tag
+matching is AND across every tag given:
+
+```python
+dp.list(tag=["v03", "bazin"])   # records carrying both
+dp.list(tag="v03,bazin")        # the same query
+```
+
+Note this differs from root names, which are matched **exactly** and are case-sensitive.

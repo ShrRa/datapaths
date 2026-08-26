@@ -41,6 +41,15 @@ See `docs/architecture.md` for the durability guarantees behind these.
   committed and read on other machines.
 * **`ArtifactType` is advisory.** It is a `Literal` for editors only and must never be
   enforced at runtime — any string is a valid type.
+* **Validate safety, never convention.** Names are checked only for things that make them
+  unsafe as a filename (separators, traversal, a leading dot or tilde, control characters).
+  Do not re-add rules about how a name should be *shaped* — underscore counts, prefixes,
+  version suffixes. That belongs to the project using the package. A four-part naming rule
+  for `type="features"` was removed for exactly this reason.
+* **Layout does not depend on type.** Every artifact is `{root}/{name}.{ext}`. `type`
+  selects the root and nothing else; `relpath=` is how a caller asks for a subdirectory.
+* **`TYPE_TO_ROOT` ships empty.** It is an escape hatch for a consuming project, not a
+  vocabulary. Do not populate it with defaults.
 * **Tests must not assume POSIX separators or a case-sensitive filesystem.** CI runs on
   Windows and macOS.
 

@@ -7,7 +7,7 @@
 | `datapaths.py` | The `Datapaths` class — resolve, save, register, list, print_paths, verify |
 | `config.py` | Repo-root discovery, env overrides, roots file |
 | `registry.py` | Read/write the registry YAML under a file lock |
-| `artifacts.py` | Canonical relative paths, atomic writes, archiving |
+| `artifacts.py` | Name validation, canonical relative paths, atomic writes, archiving |
 | `hashing.py` | sha256 of files and bytes |
 | `cli.py` | `datapaths` command |
 | `exceptions.py` | `DatapathsError` and friends |
@@ -42,6 +42,11 @@ processes appending concurrently do not lose each other's entries.
 **Overwrites archive, never delete.** Replacing a registered artifact moves the old file
 into `_archive/` under a name carrying its UTC timestamp and short hash. The registry record
 keeps the last five archived entries under an `archived` list.
+
+**Names cannot escape their root.** `validate_artifact_name` and `validate_relpath` run
+before anything touches the filesystem, so a traversing name fails without leaving a
+partial write or a registry entry behind. This is the *only* constraint on names: the
+package validates safety, never convention.
 
 **Registry paths are POSIX-style, always.** The registry is committed and read on other
 machines; a Windows-written `bazin\f.parquet` would be one filename containing backslashes
