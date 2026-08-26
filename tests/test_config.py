@@ -6,7 +6,6 @@ explicit argument > environment variable > configs/ default.
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
 
 import pytest
@@ -69,6 +68,7 @@ class TestEnvOverrides:
 
     def test_repo_root_override_expands_user(self, repo, monkeypatch):
         monkeypatch.setenv("HOME", str(repo.root.parent))
+        monkeypatch.setenv("USERPROFILE", str(repo.root.parent))  # Windows
         monkeypatch.setenv(ENV_REPO_ROOT, f"~/{repo.root.name}")
         assert resolve_repo_root() == repo.root.resolve()
 
@@ -148,12 +148,31 @@ class TestFailures:
 
 
 class TestLoadRoots:
-    def test_paths_are_absolute_and_user_expanded(self, repo, monkeypatch):
-        monkeypatch.setenv("HOME", "/home/someone")
-        repo.write_roots({"features": "~/features", "data": "/abs/data"})
+    def test_paths_are_absolute_and_user_expanded(self, repo, monkeypatch, tmp_path):
+        """~ is expanded and every path comes back absolute.
+
+        Uses real directories rather than invented ones, and compares against
+        resolve() rather than a literal: the point is that load_roots resolves,
+        and platforms disagree about what a given literal resolves to. On macOS
+        /home is a firmlink to /System/Volumes/Data/home, so an assertion
+        naming /home/someone fails there while the code is behaving correctly.
+
+        HOME and USERPROFILE are both set because Path.expanduser reads the
+        first on POSIX and the second on Windows.
+        """
+        home = tmp_path / "home" / "someone"
+        (home / "features").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere" / "data"
+        elsewhere.mkdir(parents=True)
+
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        repo.write_roots({"features": "~/features", "data": str(elsewhere)})
+
         roots = load_roots(load_config())
-        assert roots["features"] == Path("/home/someone/features")
-        assert roots["data"] == Path("/abs/data")
+        assert roots["features"] == (home / "features").resolve()
+        assert roots["data"] == elsewhere.resolve()
+        assert all(p.is_absolute() for p in roots.values())
 
     def test_malformed_entries_are_skipped_not_fatal(self, repo):
         """A nested or non-string entry is dropped, and the rest still load.
@@ -170,7 +189,8 @@ class TestLoadRoots:
         )
         with pytest.warns(ConfigWarning):
             roots = load_roots(load_config())
-        assert roots == {"features": Path("/abs/features")}
+        assert list(roots) == ["features"]
+        assert roots["features"].is_absolute()
 
 
 class TestRootsFileDiagnostics:
