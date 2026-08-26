@@ -16,6 +16,8 @@ from .artifacts import (
     ensure_parent,
     normalize_tags,
     now_iso,
+    validate_artifact_name,
+    validate_relpath,
     write_bytes_atomic,
     write_json_atomic,
     write_pickle_atomic,
@@ -145,23 +147,23 @@ class Datapaths:
         inputs: list[str] | None = None,
         notes: str | None = None,
         updated_by: str | None = None,
-        force_flat_layout: bool = False,
-        overwrite: bool = True,
+        overwrite_file: bool = True,
         archive_previous: bool = True,
         on_same: Literal["skip", "overwrite", "archive"] = "skip",
     ) -> dict[str, Any]:
+        """Serialize an object into its root and record it in the registry.
+
+        `overwrite_file` governs bytes on disk: with it False, an existing file
+        at the destination is an error rather than something to replace. It
+        defaults to True because save() exists to write new versions of an
+        artifact -- register(), which adopts files it did not create, defaults
+        the same flag to False.
+        """
         self.reload()
+        validate_artifact_name(name)
         rk = self._resolve_root(type, root_key)
 
-        layout: Literal["one_level_family", "flat"] = (
-            "flat" if (force_flat_layout or type != "features") else "one_level_family"
-        )
-        rel = Path(relpath) if relpath else canonical_relpath(
-            name,
-            fmt,
-            layout=layout,
-            enforce_family_naming=(type == "features" and layout == "one_level_family"),
-        )
+        rel = validate_relpath(relpath) if relpath else canonical_relpath(name, fmt)
         abs_path = self.roots[rk] / rel
 
         existing = self.catalogues.get(name, {})
@@ -217,7 +219,7 @@ class Datapaths:
                         "notes": wanted_notes,
                     }
 
-                if not overwrite and not unchanged:
+                if not overwrite_file and not unchanged:
                     raise ArtifactError(f"Artifact already exists: {abs_path}")
 
                 do_archive = (
@@ -287,35 +289,55 @@ class Datapaths:
         inputs: list[str] | None = None,
         notes: str | None = None,
         updated_by: str | None = None,
-        force_flat_layout: bool = False,
         copy_into_canonical: bool = False,
-        overwrite: bool = False,
+        overwrite_file: bool = False,
+        overwrite_history: bool = False,
         archive_previous: bool = True,
     ) -> dict[str, Any]:
+        """Record a file that already exists, without serializing anything.
+
+        Two independent overwrite flags, because two different things can be in
+        the way:
+
+        `overwrite_file` -- bytes on disk. Only relevant with
+        copy_into_canonical=True, where a file may already occupy the
+        destination. False by default: register adopts files it did not create,
+        so replacing one is a decision the caller should make out loud.
+
+        `overwrite_history` -- the registry record. False by default: if the
+        name is already registered, the call is skipped with a warning rather
+        than replacing an entry whose archived history cannot be reconstructed
+        from disk. Pass True to rewrite the record deliberately; the archived
+        list is carried across either way.
+        """
         self.reload()
+        validate_artifact_name(name)
         rk = self._resolve_root(type, root_key)
+
+        existing = self.catalogues.get(name)
+        if existing is not None and not overwrite_history:
+            warnings.warn(
+                f"'{name}' is already registered (path: {existing.get('path')}); "
+                f"skipping. Pass overwrite_history=True to replace the record.",
+                ArtifactWarning,
+                stacklevel=2,
+            )
+            return dict(existing)
 
         src = Path(src_path).expanduser().resolve()
         if not src.exists():
             raise ArtifactError(f"Source path does not exist: {src}")
 
         if copy_into_canonical:
-            layout: Literal["one_level_family", "flat"] = (
-                "flat" if (force_flat_layout or type != "features") else "one_level_family"
-            )
             # A format with no saver still names a real file: borrow the
             # source's own suffix so the canonical name keeps matching it.
-            rel = Path(relpath) if relpath else canonical_relpath(
-                name,
-                fmt,
-                layout=layout,
-                enforce_family_naming=(type == "features" and layout == "one_level_family"),
-                fallback_ext=src.suffix,
+            rel = validate_relpath(relpath) if relpath else canonical_relpath(
+                name, fmt, fallback_ext=src.suffix,
             )
             dst = self.roots[rk] / rel
 
             if dst.exists():
-                if not overwrite:
+                if not overwrite_file:
                     raise ArtifactError(f"Destination exists: {dst}")
                 old_hash = sha256_file(dst)
                 if archive_previous:
@@ -370,7 +392,12 @@ class Datapaths:
         }
 
         def _upd(reg: Registry) -> Registry:
-            reg.artifacts[name] = record
+            # Merge rather than assign: the archived list is provenance that
+            # cannot be rebuilt from the files on disk, so a deliberate
+            # re-register updates the record and leaves the history alone.
+            a = reg.artifacts.get(name, {})
+            a.update(record)
+            reg.artifacts[name] = a
             return reg
 
         update_registry_atomic(self.cfg.registry_file, _upd)

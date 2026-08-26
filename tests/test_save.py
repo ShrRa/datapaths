@@ -57,23 +57,30 @@ class TestFormats:
 
 
 class TestLayout:
-    def test_features_nest_under_their_family(self, dp, frame):
-        rec = dp.save(frame, name="bazin_train_s01_c01", type="features")
+    def test_features_are_flat_like_every_other_type(self, dp, frame):
         # POSIX literal, not str(Path(...)): the registry is committed and read
         # on other machines, so the separator must not depend on the writer's.
-        assert rec["path"] == "bazin/bazin_train_s01_c01.parquet"
+        rec = dp.save(frame, name="bazin_train_s01_c01", type="features")
+        assert rec["path"] == "bazin_train_s01_c01.parquet"
 
     def test_non_features_are_flat(self, dp):
         rec = dp.save({"a": 1}, name="a_b_c_d", type="misc", fmt="json")
         assert rec["path"] == "a_b_c_d.json"
 
-    def test_force_flat_layout_overrides_family_nesting(self, dp, frame):
-        rec = dp.save(frame, name="bazin_train_s01_c01", type="features", force_flat_layout=True)
-        assert rec["path"] == "bazin_train_s01_c01.parquet"
+    @pytest.mark.parametrize("type", ["features", "misc", "models", "predictions", "data"])
+    def test_every_type_produces_the_same_shape(self, dp, type):
+        """`type` selects the root and nothing else about the path."""
+        rec = dp.save({"a": 1}, name="a_b_c_d", type=type, fmt="json")
+        assert rec["path"] == "a_b_c_d.json"
 
-    def test_features_name_with_too_few_tokens_is_refused(self, dp, frame):
-        with pytest.raises(ArtifactError, match="at least 4"):
-            dp.save(frame, name="short_name", type="features")
+    def test_a_short_features_name_is_accepted(self, dp, frame):
+        """features used to demand four underscore-separated parts."""
+        rec = dp.save(frame, name="short_name", type="features")
+        assert rec["path"] == "short_name.parquet"
+
+    def test_a_features_name_with_no_underscore_is_accepted(self, dp, frame):
+        rec = dp.save(frame, name="solo", type="features")
+        assert rec["path"] == "solo.parquet"
 
     def test_explicit_relpath_wins(self, dp, frame):
         rec = dp.save(frame, name="anything", type="features", relpath="custom/here.parquet")
@@ -125,7 +132,7 @@ class TestOnSame:
 
     def test_skip_warns_and_leaves_the_file_untouched(self, dp, repo, frame):
         dp.save(frame, name="a_b_c_d", type="features", tags=["v1"])
-        path = repo.roots["features"] / "a" / "a_b_c_d.parquet"
+        path = repo.roots["features"] / "a_b_c_d.parquet"
         before = path.stat().st_mtime_ns
 
         with pytest.warns(UserWarning, match="unchanged"):
@@ -201,14 +208,14 @@ class TestOverwriteAndArchive:
     def test_overwrite_false_refuses_changed_content(self, dp, frame):
         dp.save(frame, name="a_b_c_d", type="features")
         with pytest.raises(ArtifactError, match="already exists"):
-            dp.save(frame.assign(flux=1.0), name="a_b_c_d", type="features", overwrite=False)
+            dp.save(frame.assign(flux=1.0), name="a_b_c_d", type="features", overwrite_file=False)
 
     def test_overwrite_false_permits_an_unchanged_rewrite(self, dp, frame):
         """Deliberate: nothing is lost by rewriting identical bytes."""
         dp.save(frame, name="a_b_c_d", type="features", tags=["v1"])
         rec = dp.save(
             frame, name="a_b_c_d", type="features", tags=["v1"],
-            overwrite=False, on_same="overwrite",
+            overwrite_file=False, on_same="overwrite",
         )
         assert rec["tags"] == ["v1"]
 
@@ -247,7 +254,7 @@ class TestAtomicity:
 
     def test_a_failed_overwrite_leaves_the_previous_file_intact(self, dp, repo, frame):
         dp.save(frame, name="a_b_c_d", type="features")
-        path = repo.roots["features"] / "a" / "a_b_c_d.parquet"
+        path = repo.roots["features"] / "a_b_c_d.parquet"
         before = path.read_bytes()
 
         class HalfWriter:
@@ -264,3 +271,30 @@ class TestAtomicity:
     def test_successful_save_leaves_no_staging_file(self, dp, repo, frame):
         dp.save(frame, name="a_b_c_d", type="features")
         assert stray_files(repo.roots["features"]) == []
+
+
+class TestNameValidation:
+    """A name becomes a filename, so it must stay one and stay inside the root."""
+
+    @pytest.mark.parametrize(
+        "name", ["../../escape", "sub/dir", "..", ".hidden", "", "   ", "~cache"]
+    )
+    def test_a_bad_name_is_refused(self, dp, name):
+        with pytest.raises(ArtifactError):
+            dp.save({"a": 1}, name=name, type="misc", fmt="json")
+
+    def test_a_traversing_name_writes_nothing_outside_the_root(self, dp, repo):
+        outside = repo.roots["misc"].parent / "escape.json"
+        with pytest.raises(ArtifactError):
+            dp.save({"a": 1}, name="../escape", type="misc", fmt="json")
+        assert not outside.exists()
+        assert dp.list() == []
+
+    def test_a_relpath_escaping_the_root_is_refused(self, dp, frame):
+        with pytest.raises(ArtifactError, match="outside"):
+            dp.save(frame, name="ok_name", type="features", relpath="../../escaped.parquet")
+
+    def test_the_name_is_validated_even_when_relpath_is_given(self, dp, frame):
+        """The name is the registry key regardless of where the bytes land."""
+        with pytest.raises(ArtifactError):
+            dp.save(frame, name="../escape", type="features", relpath="fine/here.parquet")

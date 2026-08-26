@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from datapaths.artifacts import archive_path, canonical_relpath, normalize_tag, normalize_tags
+from datapaths.artifacts import (
+    archive_path,
+    canonical_relpath,
+    normalize_tag,
+    normalize_tags,
+    validate_artifact_name,
+    validate_relpath,
+)
 from datapaths.exceptions import ArtifactError
 from datapaths.hashing import BUF, sha256_bytes, sha256_file, short_hash
 
@@ -18,37 +25,104 @@ class TestCanonicalRelpath:
         [("parquet", "parquet"), ("csv", "csv"), ("json", "json"), ("bin", "bin"), ("pickle", "pkl")],
     )
     def test_extension_per_format(self, fmt, ext):
-        got = canonical_relpath("a_b_c_d", fmt, layout="flat")
+        got = canonical_relpath("a_b_c_d", fmt)
         assert got == Path(f"a_b_c_d.{ext}")
 
     def test_pickle_is_abbreviated_to_pkl(self):
-        assert canonical_relpath("x", "pickle", layout="flat").suffix == ".pkl"
+        assert canonical_relpath("x", "pickle").suffix == ".pkl"
 
-    def test_one_level_family_nests_under_the_first_token(self):
-        got = canonical_relpath("bazin_train_s01_c01", "parquet")
-        assert got == Path("bazin") / "bazin_train_s01_c01.parquet"
+    def test_the_layout_is_always_flat(self):
+        """One rule for every type: {name}.{ext}, directly under the root.
 
-    def test_flat_layout_does_not_nest(self):
-        got = canonical_relpath("bazin_train_s01_c01", "parquet", layout="flat")
-        assert got.parent == Path(".")
+        Nesting used to depend on the artifact's type, which made `type` mean
+        two things at once -- which root, and what shape the path takes inside
+        it. It now means only the first.
+        """
+        assert canonical_relpath("bazin_train_s01_c01", "parquet").parent == Path(".")
 
-    def test_family_naming_refuses_too_few_tokens(self):
-        with pytest.raises(ArtifactError, match="at least 4"):
-            canonical_relpath("only_three_parts", "parquet", enforce_family_naming=True)
-
-    def test_family_naming_accepts_exactly_four(self):
-        assert canonical_relpath("a_b_c_d", "parquet", enforce_family_naming=True).parent == Path("a")
-
-    def test_unenforced_short_name_still_gets_a_family(self):
-        assert canonical_relpath("solo", "json") == Path("solo") / "solo.json"
+    @pytest.mark.parametrize("name", ["solo", "two_parts", "a_b_c", "a_b_c_d", "a_b_c_d_e"])
+    def test_no_name_shape_is_required(self, name):
+        """Underscore count carries no meaning. It once had to be at least 4."""
+        assert canonical_relpath(name, "json") == Path(f"{name}.json")
 
     def test_unsupported_format_raises(self):
         with pytest.raises(ArtifactError, match="Unsupported format"):
-            canonical_relpath("x", "zarr", layout="flat")
+            canonical_relpath("x", "zarr")
 
-    def test_unknown_layout_raises(self):
-        with pytest.raises(ArtifactError, match="Unknown layout"):
-            canonical_relpath("x", "json", layout="pyramid")
+
+class TestValidateArtifactName:
+    """What replaces the old naming convention.
+
+    The package used to refuse a features name with too few underscores while
+    happily accepting one that escaped the root. This is the check that
+    actually matters: a name becomes a filename, so it must stay one path
+    component and it must not be able to point outside its root.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        ["solo", "two_parts", "a_b_c_d", "lc-cube", "cube.v2", "Features_Train", "café", "x" * 200],
+    )
+    def test_ordinary_names_pass_through(self, name):
+        assert validate_artifact_name(name) == name
+
+    @pytest.mark.parametrize("name", ["", "   ", "\t"])
+    def test_empty_or_blank_is_refused(self, name):
+        with pytest.raises(ArtifactError, match="empty"):
+            validate_artifact_name(name)
+
+    @pytest.mark.parametrize("name", ["sub/dir", "sub\\dir", "a/b/c"])
+    def test_a_separator_is_refused(self, name):
+        """A name is one path component. Use relpath to nest deliberately."""
+        with pytest.raises(ArtifactError, match="separator"):
+            validate_artifact_name(name)
+
+    @pytest.mark.parametrize("name", ["..", ".", "../escape", "../../escape"])
+    def test_traversal_is_refused(self, name):
+        with pytest.raises(ArtifactError):
+            validate_artifact_name(name)
+
+    @pytest.mark.parametrize("name", [".hidden", ".datapaths"])
+    def test_a_leading_dot_is_refused(self, name):
+        """Hidden files have no place in a provenance registry."""
+        with pytest.raises(ArtifactError, match="dot"):
+            validate_artifact_name(name)
+
+    def test_a_leading_tilde_is_refused(self):
+        with pytest.raises(ArtifactError):
+            validate_artifact_name("~cache")
+
+    @pytest.mark.parametrize("name", ["nul\x00byte", "bell\x07", "line\nbreak"])
+    def test_control_characters_are_refused(self, name):
+        with pytest.raises(ArtifactError, match="control"):
+            validate_artifact_name(name)
+
+    def test_an_absolute_path_is_refused(self):
+        with pytest.raises(ArtifactError):
+            validate_artifact_name("/etc/passwd")
+
+    def test_the_error_names_the_offending_value(self):
+        with pytest.raises(ArtifactError) as exc:
+            validate_artifact_name("../escape")
+        assert "../escape" in str(exc.value)
+
+
+class TestValidateRelpath:
+    def test_an_ordinary_relative_path_passes(self):
+        assert validate_relpath("cubes/panel_a.fits") == Path("cubes/panel_a.fits")
+
+    @pytest.mark.parametrize("rel", ["../outside.fits", "cubes/../../outside.fits", ".."])
+    def test_traversal_is_refused(self, rel):
+        with pytest.raises(ArtifactError, match="outside"):
+            validate_relpath(rel)
+
+    def test_an_absolute_path_is_refused(self, tmp_path):
+        with pytest.raises(ArtifactError, match="relative"):
+            validate_relpath(str(tmp_path / "x.fits"))
+
+    def test_an_empty_relpath_is_refused(self):
+        with pytest.raises(ArtifactError):
+            validate_relpath("")
 
 
 class TestArchivePath:

@@ -155,14 +155,14 @@ class TestIgnoredRelpathIsAudible:
 
 class TestCanonicalRelpathFallback:
     def test_fallback_ext_is_used_only_for_unknown_formats(self):
-        assert canonical_relpath("x", "fits", layout="flat", fallback_ext=".fits") == \
+        assert canonical_relpath("x", "fits", fallback_ext=".fits") == \
             __import__("pathlib").Path("x.fits")
-        assert canonical_relpath("x", "pickle", layout="flat", fallback_ext=".pickle") == \
+        assert canonical_relpath("x", "pickle", fallback_ext=".pickle") == \
             __import__("pathlib").Path("x.pkl")
 
     def test_a_bare_suffix_without_the_dot_works_too(self):
-        assert canonical_relpath("x", "fits", layout="flat", fallback_ext="fits").suffix == ".fits"
+        assert canonical_relpath("x", "fits", fallback_ext="fits").suffix == ".fits"
 
     def test_no_fallback_and_unknown_format_raises(self):
         with pytest.raises(ArtifactError, match="Unsupported format"):
-            canonical_relpath("x", "fits", layout="flat")
+            canonical_relpath("x", "fits")

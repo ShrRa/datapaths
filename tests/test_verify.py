@@ -21,8 +21,8 @@ def four_states(repo, frame):
     dp.save(frame, name="drifted_a_b_c", type="features", tags=["other"])
     dp.save({"x": 1}, name="orphan", type="models", fmt="json")
 
-    (repo.roots["features"] / "missing" / "missing_a_b_c.parquet").unlink()
-    (repo.roots["features"] / "drifted" / "drifted_a_b_c.parquet").write_bytes(b"rewritten")
+    (repo.roots["features"] / "missing_a_b_c.parquet").unlink()
+    (repo.roots["features"] / "drifted_a_b_c.parquet").write_bytes(b"rewritten")
 
     roots = dict(repo.roots)
     del roots["models"]
@@ -61,7 +61,7 @@ class TestStatuses:
         same bytes is not drift."""
         dp = repo.dp()
         dp.save(frame, name="a_b_c_d", type="features")
-        path = repo.roots["features"] / "a" / "a_b_c_d.parquet"
+        path = repo.roots["features"] / "a_b_c_d.parquet"
         path.write_bytes(path.read_bytes())
         assert status_of(dp.verify(), "a_b_c_d") == "OK"
 

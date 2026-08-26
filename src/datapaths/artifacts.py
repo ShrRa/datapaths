@@ -16,15 +16,11 @@ from .hashing import short_hash
 ArtifactType = Literal["data", "dataprep", "features", "predictions", "models", "misc"]
 Format = Literal["parquet", "csv", "json", "bin", "pickle"]
 
-# Types whose root is not simply a root of the same name.
-TYPE_TO_ROOT: dict[str, str] = {
-    "data": "data",
-    "dataprep": "data",
-    "features": "features",
-    "predictions": "predictions",
-    "models": "models",
-    "misc": "misc",
-}
+# Types whose root is *not* a root of the same name. Empty by design: a type
+# resolves to the root it is named after, so this table is an escape hatch for
+# a project that needs an exception, not a vocabulary the package ships. It
+# still takes precedence over the same-name fallback when it is populated.
+TYPE_TO_ROOT: dict[str, str] = {}
 
 
 def normalize_tag(v: Any) -> str:
@@ -45,22 +41,95 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def validate_artifact_name(name: str) -> str:
+    """Refuse a name that cannot safely become a filename.
+
+    This is the only rule the package imposes on names. It does not care how
+    many underscores a name has or what it starts with -- naming conventions
+    belong to the project, not to the library. What it does care about is that
+    a name becomes a path component under a root, so it must not be able to
+    reach outside one or split into several.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ArtifactError("Artifact name is empty.")
+
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        raise ArtifactError(
+            f"Artifact name contains a control character: {name!r}."
+        )
+
+    if "/" in name or "\\" in name:
+        raise ArtifactError(
+            f"Artifact name contains a path separator: {name!r}. A name is one "
+            f"path component; pass relpath= to place the file in a subdirectory."
+        )
+
+    if name in (".", ".."):
+        raise ArtifactError(f"Artifact name is not a usable filename: {name!r}.")
+
+    if name.startswith("."):
+        raise ArtifactError(
+            f"Artifact name starts with a dot: {name!r}. Hidden files have no "
+            f"place in a provenance registry."
+        )
+
+    if name.startswith("~"):
+        raise ArtifactError(
+            f"Artifact name starts with '~': {name!r}, which some tools expand "
+            f"to a home directory."
+        )
+
+    return name
+
+
+def validate_relpath(relpath: str | Path) -> Path:
+    """Refuse a relpath that is absolute or escapes its root.
+
+    Checked lexically, on the path as written: the root it will be joined to
+    may not exist yet, and a relpath is a statement about layout rather than
+    about what is currently on disk.
+    """
+    rel = Path(relpath)
+    if not str(relpath).strip():
+        raise ArtifactError("relpath is empty.")
+    if rel.is_absolute():
+        raise ArtifactError(f"relpath must be relative, got {relpath!r}.")
+
+    parts: list[str] = []
+    for part in rel.parts:
+        if part == "..":
+            if not parts:
+                raise ArtifactError(
+                    f"relpath points outside its root: {relpath!r}."
+                )
+            parts.pop()
+        elif part not in ("", "."):
+            parts.append(part)
+
+    if not parts:
+        raise ArtifactError(f"relpath points outside its root: {relpath!r}.")
+    return rel
+
+
 def canonical_relpath(
     name: str,
     fmt: Format | str,
     *,
-    layout: Literal["one_level_family", "flat"] = "one_level_family",
-    enforce_family_naming: bool = False,
     fallback_ext: str | None = None,
 ) -> Path:
-    """Build the canonical path for an artifact.
+    """Build the canonical path for an artifact: {name}.{ext}, flat.
+
+    One rule for every type. `type` selects which root an artifact lands in and
+    nothing else about its path -- it used to also decide the shape of the path
+    inside that root, which made "features" behave unlike every other type for
+    no reason a user could see.
 
     `fallback_ext` supplies an extension for a format this package cannot
     write, which is how register() adopts a FITS cube or an HDF5 model: the
     format has no saver, but the file on disk already carries a suffix that
     says what it is, and the canonical name should keep matching it.
     """
-    parts = name.split("_")
+    validate_artifact_name(name)
 
     ext_map = {
         "parquet": "parquet",
@@ -78,20 +147,7 @@ def canonical_relpath(
             f"explicit relpath."
         )
 
-    filename = f"{name}.{ext}"
-
-    if layout == "one_level_family":
-        if enforce_family_naming and len(parts) < 4:
-            raise ArtifactError(
-                f"Name '{name}' must look like family_split_sourceVer_catVer "
-                "(at least 4 underscore-separated parts)."
-            )
-        family = parts[0]
-        return Path(family) / filename
-    if layout == "flat":
-        return Path(filename)
-
-    raise ArtifactError(f"Unknown layout: {layout}")
+    return Path(f"{name}.{ext}")
 
 
 def archive_path(root_abs: Path, relpath: Path, old_hash: str) -> Path:
@@ -143,8 +199,6 @@ def write_pickle_atomic(path: Path, obj: Any) -> None:
 def write_tabular(path: Path, obj: Any, fmt: Format) -> None:
     if not hasattr(obj, "to_parquet") and not hasattr(obj, "to_csv"):
         raise ArtifactError("Tabular save expects a pandas DataFrame (or compatible).")
-    if fmt not in ("parquet", "csv"):
-        raise ArtifactError(f"Unsupported tabular format: {fmt}")
 
     with _staged(path) as tmp:
         if fmt == "parquet":

@@ -35,8 +35,14 @@ def main() -> None:
     p_reg.add_argument("--tag", action="append", default=[])
     p_reg.add_argument("--notes", default="")
     p_reg.add_argument("--copy-into-canonical", action="store_true")
-    p_reg.add_argument("--force-flat-layout", action="store_true")
-    p_reg.add_argument("--overwrite", action="store_true")
+    p_reg.add_argument(
+        "--overwrite-file", action="store_true",
+        help="replace a file already sitting at the canonical destination",
+    )
+    p_reg.add_argument(
+        "--overwrite-history", action="store_true",
+        help="replace the registry record if this name is already registered",
+    )
 
     args = p.parse_args()
     dp = Datapaths()
@@ -60,9 +66,9 @@ def main() -> None:
             fmt=args.fmt,
             tags=args.tag,
             notes=args.notes,
-            force_flat_layout=args.force_flat_layout,
             copy_into_canonical=args.copy_into_canonical,
-            overwrite=args.overwrite,
+            overwrite_file=args.overwrite_file,
+            overwrite_history=args.overwrite_history,
         )
         print(json.dumps(rec, indent=2, ensure_ascii=False))
         return

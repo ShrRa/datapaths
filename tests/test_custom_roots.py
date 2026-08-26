@@ -53,8 +53,8 @@ class TestDeclaredRootIsEnough:
         )
         assert rec["root"] == "plots"
 
-    def test_a_custom_type_is_flat_not_family_nested(self, with_plots):
-        """Family nesting is a features-only convention."""
+    def test_a_custom_type_is_flat(self, with_plots):
+        """Every type is flat; a custom one is not a special case."""
         rec = with_plots.dp().save(b"x", name="a_b_c_d", type="plots", fmt="bin")
         assert rec["path"] == "a_b_c_d.bin"
 
@@ -66,20 +66,30 @@ class TestPrecedence:
         )
         assert rec["root"] == "misc"
 
-    def test_type_to_root_wins_over_a_same_named_root(self, with_plots):
-        """dataprep maps to the data root, and must keep doing so.
+    def test_a_same_named_root_is_used(self, with_plots):
+        """A type resolves to the root of the same name -- dataprep included.
 
-        Someone who also defines a 'dataprep' root must not silently see their
-        existing dataprep artifacts start landing somewhere new.
+        dataprep used to be special-cased onto the 'data' root by TYPE_TO_ROOT.
+        That mapping was a remnant of one project's layout, so the table is now
+        empty and every type goes through the same fallback.
         """
         repo = with_plots
         dataprep = repo.root.parent / "store" / "dataprep"
         dataprep.mkdir()
         repo.write_roots({**repo.roots, "dataprep": dataprep})
 
-        assert TYPE_TO_ROOT["dataprep"] == "data"
         rec = repo.dp().save({"a": 1}, name="prepped", type="dataprep", fmt="json")
-        assert rec["root"] == "data"
+        assert rec["root"] == "dataprep"
+        assert (dataprep / "prepped.json").exists()
+
+    def test_the_mapping_table_is_empty(self):
+        """Kept as an escape hatch, but it must not ship an opinion."""
+        assert TYPE_TO_ROOT == {}
+
+    def test_dataprep_without_a_root_now_raises(self, repo):
+        """The migration hazard, pinned deliberately."""
+        with pytest.raises(ArtifactError, match="No root configured for type 'dataprep'"):
+            repo.dp().save({"a": 1}, name="prepped", type="dataprep", fmt="json")
 
     def test_built_in_types_are_unaffected(self, with_plots, frame):
         rec = with_plots.dp().save(frame, name="a_b_c_d", type="features")

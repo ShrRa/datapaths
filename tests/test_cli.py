@@ -68,7 +68,7 @@ class TestVerify:
         assert {r["status"] for r in rows} == {"OK"}
 
     def test_detects_drift(self, stocked):
-        target = stocked.roots["features"] / "bazin" / "bazin_train_s01_c01.parquet"
+        target = stocked.roots["features"] / "bazin_train_s01_c01.parquet"
         target.write_bytes(b"tampered")
         rows = json.loads(run(stocked, "verify").stdout)
         bad = [r for r in rows if r["status"] == "HASH_MISMATCH"]
@@ -146,3 +146,24 @@ class TestConsoleScript:
         )
         assert proc.returncode == 0, proc.stderr
         assert [r["name"] for r in json.loads(proc.stdout)] == ["lgbm"]
+
+
+class TestRemovedFlags:
+    def test_force_flat_layout_is_gone(self, repo, tmp_path):
+        """Every type is flat now, so the flag had nothing left to force."""
+        src = tmp_path / "outside.json"
+        src.write_text("{}")
+        r = run(repo, "register", "--name", "adopted", "--type", "misc",
+                "--file", str(src), "--fmt", "json", "--force-flat-layout",
+                expect_ok=False)
+        assert r.returncode != 0
+
+    def test_overwrite_history_is_accepted(self, repo, tmp_path):
+        src = repo.roots["misc"] / "adopted.json"
+        src.write_text("{}")
+        run(repo, "register", "--name", "adopted", "--type", "misc",
+            "--file", str(src), "--fmt", "json")
+        r = run(repo, "register", "--name", "adopted", "--type", "misc",
+                "--file", str(src), "--fmt", "json", "--notes", "second",
+                "--overwrite-history")
+        assert json.loads(r.stdout)["notes"] == "second"
