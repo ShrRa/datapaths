@@ -78,7 +78,7 @@ repo root (resolved against it).
 ```bash
 export DATAPATHS_REPO_ROOT=/home/grumpy_hippo/Data/Work/Github/var_stars_project
 export DATAPATHS_ROOTS_FILE=etc/roots.yaml            # relative to the repo root
-export DATAPATHS_REGISTRY_FILE=/shared/registry.yaml  # absolute
+export DATAPATHS_REGISTRY_FILE=/shared/registry.yaml  # absolute paths work too (but for collaborative work, make sure its committed)
 ```
 
 `DATAPATHS_REPO_ROOT` is the one worth setting habitually. Root discovery starts from the
