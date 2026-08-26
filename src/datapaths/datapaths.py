@@ -14,7 +14,6 @@ from .artifacts import (
     archive_path,
     canonical_relpath,
     ensure_parent,
-    normalize_tag,
     normalize_tags,
     now_iso,
     write_bytes_atomic,
@@ -311,7 +310,7 @@ class Datapaths:
             "updated_at": now_iso(),
             "updated_by": updated_by or os.environ.get("USER") or os.environ.get("USERNAME") or "unknown",
             "hash": h,
-            "tags": sorted(set(tags or [])),
+            "tags": sorted(normalize_tags(tags)),
             "inputs": inputs or [],
             "notes": notes or "",
         }
@@ -333,14 +332,11 @@ class Datapaths:
         text: str | None = None,
     ) -> list[dict[str, Any]]:
         wanted_name = name.strip().lower() if name else None
-        wanted_tags: set[str]
-        if tag is None:
-            wanted_tags = set()
-        elif isinstance(tag, str):
-            nt = normalize_tag(tag)
-            wanted_tags = {nt} if nt else set()
-        else:
-            wanted_tags = normalize_tags(tag)
+        # normalize_tags splits a comma string, so "v02,bazin" filters on both.
+        # Every write path normalizes the same way, which means no stored tag
+        # can contain a comma -- treating the query as one literal tag could
+        # only ever match nothing.
+        wanted_tags = normalize_tags(tag)
 
         out: list[dict[str, Any]] = []
         for art_name, rec in self.catalogues.items():
@@ -415,9 +411,10 @@ class Datapaths:
         *,
         names: Iterable[str] | None = None,
         type: ArtifactType | None = None,
-        tag: str | None = None,
+        tag: str | list[str] | None = None,
     ) -> list[dict[str, Any]]:
         wanted = set(names) if names else None
+        wanted_tags = normalize_tags(tag)
         results: list[dict[str, Any]] = []
 
         for name, rec in self.catalogues.items():
@@ -425,7 +422,7 @@ class Datapaths:
                 continue
             if type and rec.get("type") != type:
                 continue
-            if tag and normalize_tag(tag) not in normalize_tags(rec.get("tags")):
+            if wanted_tags and not wanted_tags.issubset(normalize_tags(rec.get("tags"))):
                 continue
 
             rk = rec.get("root")

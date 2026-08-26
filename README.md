@@ -102,6 +102,7 @@ Installed as `datapaths`:
 
 ```bash
 datapaths list --type features --tag v02
+datapaths list --tag v02,bazin            # comma means AND: both tags required
 datapaths verify --type features          # re-hash and report drift
 datapaths register --name my_table --type features --file /tmp/x.parquet --fmt parquet
 ```
@@ -127,8 +128,28 @@ a crashed or concurrent run does not leave a half-written artifact or a corrupte
 Overwriting a registered artifact moves the old file into `_archive/` under a name carrying
 its timestamp and short hash rather than deleting it.
 
+## Tests
+
+```bash
+pip install -e ".[tabular,dev]"
+pytest
+```
+
+186 tests, about four seconds. Installing without the `tabular` extra is supported and
+tested — the parquet/csv tests skip themselves rather than failing, so a consumer that only
+resolves paths can still run the suite.
+
+Two of them are worth knowing about, because they fail loudly if the protection they cover
+is ever removed:
+
+* `test_registry_concurrency.py` runs two processes appending to one registry and checks
+  that neither loses the other's entries. With the `filelock` removed it does not merely
+  drop records — it leaves the registry as unparseable YAML.
+* `test_save.py::TestAtomicity` interrupts a write part-way and asserts nothing is left
+  behind. Staging temp files that outlive a failed write accumulate invisibly in the data
+  root.
+
 ## Status
 
 Extracted from the `mallorn_tde` repository, where it had been copied by hand into several
-projects. No test suite yet — that is the first thing to add, since it is now a dependency
-that can break several projects at once.
+projects.

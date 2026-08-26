@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 import json
 import pickle
 
@@ -88,11 +89,27 @@ def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def write_bytes_atomic(path: Path, data: bytes) -> None:
+@contextmanager
+def _staged(path: Path) -> Iterator[Path]:
+    """Yield a sibling temp path, then move it onto `path`.
+
+    A serialization that fails part-way -- a disk filling up, a column pyarrow
+    cannot encode, a SIGINT -- must not leave its partial output behind. The
+    caller writes to the yielded path and this cleans it up on the way out,
+    whether the write succeeded or raised.
+    """
     ensure_parent(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(data)
-    tmp.replace(path)
+    try:
+        yield tmp
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def write_bytes_atomic(path: Path, data: bytes) -> None:
+    with _staged(path) as tmp:
+        tmp.write_bytes(data)
 
 
 def write_json_atomic(path: Path, obj: Any) -> None:
@@ -101,23 +118,19 @@ def write_json_atomic(path: Path, obj: Any) -> None:
 
 
 def write_pickle_atomic(path: Path, obj: Any) -> None:
-    ensure_parent(path)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("wb") as f:
-        pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp.replace(path)
+    with _staged(path) as tmp:
+        with tmp.open("wb") as f:
+            pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def write_tabular(path: Path, obj: Any, fmt: Format) -> None:
     if not hasattr(obj, "to_parquet") and not hasattr(obj, "to_csv"):
         raise ArtifactError("Tabular save expects a pandas DataFrame (or compatible).")
-
-    ensure_parent(path)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    if fmt == "parquet":
-        obj.to_parquet(tmp, index=False)
-    elif fmt == "csv":
-        obj.to_csv(tmp, index=False)
-    else:
+    if fmt not in ("parquet", "csv"):
         raise ArtifactError(f"Unsupported tabular format: {fmt}")
-    tmp.replace(path)
+
+    with _staged(path) as tmp:
+        if fmt == "parquet":
+            obj.to_parquet(tmp, index=False)
+        else:
+            obj.to_csv(tmp, index=False)
