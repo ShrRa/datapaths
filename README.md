@@ -2,14 +2,15 @@
 
 [![tests](https://github.com/ShrRa/datapaths/actions/workflows/ci.yml/badge.svg)](https://github.com/ShrRa/datapaths/actions/workflows/ci.yml)
 
-Root-relative path resolution and a small hashed artifact registry, for data-analysis
-repositories where the data does not live next to the code.
+A package for managing datasets (paths, names, versions, provenance) for small-scale 
+data analysis and ML projects. Includes functionality for root-relative path resolution 
+and managing a small hashed artifact registry. 
 
-The problem it solves: analysis code needs to say *which* dataset it wants, not *where on
-this particular machine* that dataset sits. `datapaths` splits those apart. A committed
-registry names artifacts and records their hashes; an uncommitted, machine-local roots file
-says where the storage actually is. The same notebook then runs on a laptop and on a shared
-cluster node without an edit.
+Separation of concerns principle: the data analysis repo should know only *which* dataset
+it uses, not not *where on this particular machine* that dataset sits. `datapaths` splits 
+those apart. A committed registry names artifacts and records their hashes; an uncommitted, 
+machine-local roots file says where the storage actually is. The same notebook then runs 
+on a laptop and on a shared cluster node without an edit.
 
 ```python
 from datapaths import Datapaths
@@ -19,7 +20,10 @@ path = dp["features_train_v02"]          # -> absolute Path on this machine
 df   = pd.read_parquet(path)             # datapaths resolves and records; you read
 
 dp.save(df, name="features_train_v03", type="features", fmt="parquet",
-        tags=["v03", "bazin"], notes="after the CC-1 rename")
+        tags=["v03", "bazin"], updated_by="Jay Doe", 
+        notes="after the renaming the columns") # let your colleagues know WTH you did with this data
+
+dp.print_paths(tag=['features','supernovae', 'v18']) # inspect all weird files accumulated during the project
 ```
 
 ## Install
@@ -48,15 +52,15 @@ Add the `tabular` extra if the project saves or loads parquet/csv artifacts:
 absolute paths:
 
 ```yaml
-data: /mnt/beegfs/scratch/alex/mallorn/data
-features: /mnt/beegfs/scratch/alex/mallorn/features
-models: /mnt/beegfs/scratch/alex/mallorn/models
-predictions: /mnt/beegfs/scratch/alex/mallorn/predictions
-misc: /mnt/beegfs/scratch/alex/mallorn/misc
+data: /mnt/beegfs/scratch/grumpy_hippo/var_stars/data
+features: /mnt/beegfs/scratch/grumpy_hippo/var_stars/features
+models: /mnt/beegfs/scratch/grumpy_hippo/var_stars/models
+predictions: /mnt/beegfs/scratch/grumpy_hippo/var_stars/predictions
+misc: /mnt/beegfs/scratch/grumpy_hippo/var_stars/misc
 ```
 
-**`configs/artifacts_registry.yaml`** — committed. One record per artifact: its relative
-path under a root, format, sha256, tags, notes, timestamps. This is the file that makes an
+**`configs/artifacts_registry.yaml`** — committed. One record per artifact (catalog, ML model, etc): 
+its relative path under a root, format, sha256, tags, notes, timestamps. This is the file that makes an
 artifact reference mean the same thing to two people.
 
 Both are found relative to the repository root, which is discovered by walking up from the
@@ -70,9 +74,9 @@ uncommitted and machine-local by design, so it is meant to be edited by hand.
 Say you want somewhere to put plots. Create the directory, add it to the roots file:
 
 ```yaml
-data: /mnt/scratch/mallorn/data
-features: /mnt/scratch/mallorn/features
-plots: /mnt/scratch/mallorn/plots     # new
+data: /mnt/scratch/var_stars/data
+features: /mnt/scratch/var_stars/features
+plots: /mnt/scratch/var_stars/plots     # new
 ```
 
 and that is the whole setup. A type with no entry in `TYPE_TO_ROOT` falls back to a root of
@@ -131,7 +135,7 @@ The two file variables accept either an absolute path (used as-is) or a path rel
 repo root (resolved against it).
 
 ```bash
-export DATAPATHS_REPO_ROOT=/home/alex/Data/Work/Github/mallorn_tde
+export DATAPATHS_REPO_ROOT=/home/grumpy_hippo/Data/Work/Github/var_stars_project
 export DATAPATHS_ROOTS_FILE=etc/roots.yaml            # relative to the repo root
 export DATAPATHS_REGISTRY_FILE=/shared/registry.yaml  # absolute
 ```
@@ -246,8 +250,3 @@ is ever removed:
 * `test_save.py::TestAtomicity` interrupts a write part-way and asserts nothing is left
   behind. Staging temp files that outlive a failed write accumulate invisibly in the data
   root.
-
-## Status
-
-Extracted from the `mallorn_tde` repository, where it had been copied by hand into several
-projects.
