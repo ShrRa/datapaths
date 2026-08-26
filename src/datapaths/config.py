@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import os
+import yaml
+
+from .exceptions import ConfigError
+
+DEFAULT_ROOTS_FILE = "configs/roots.local.yaml"
+DEFAULT_REGISTRY_FILE = "configs/artifacts_registry.yaml"
+
+# Environment overrides. Each may hold an absolute path (used as-is) or a path
+# relative to the repository root (resolved against it), so a repo that does not
+# follow the configs/ convention can say so without changing any call site.
+ENV_REPO_ROOT = "DATAPATHS_REPO_ROOT"
+ENV_ROOTS_FILE = "DATAPATHS_ROOTS_FILE"
+ENV_REGISTRY_FILE = "DATAPATHS_REGISTRY_FILE"
+
+
+@dataclass(frozen=True)
+class DatapathsConfig:
+    roots_file: Path
+    registry_file: Path
+
+
+def find_repo_root(start: Path | None = None) -> Path:
+    start = (start or Path.cwd()).resolve()
+    for p in [start, *start.parents]:
+        if (p / "pyproject.toml").exists() or (p / ".git").exists():
+            return p
+    raise ConfigError(
+        "Cannot detect repository root (no pyproject.toml or .git found).\n"
+        f"Run from the repository root, set ${ENV_REPO_ROOT}, or pass "
+        "repo_root=Path(...) explicitly."
+    )
+
+
+def _env_path(name: str) -> Path | None:
+    """Read an env var as a path, treating unset and empty alike."""
+    raw = os.environ.get(name, "").strip()
+    return Path(raw).expanduser() if raw else None
+
+
+def _resolve_against(repo_root: Path, value: str | Path) -> Path:
+    """Absolute values win outright; relative ones hang off the repo root."""
+    p = Path(value).expanduser()
+    return p.resolve() if p.is_absolute() else (repo_root / p).resolve()
+
+
+def resolve_repo_root(repo_root: Path | None = None) -> Path:
+    """Precedence: explicit argument, then $DATAPATHS_REPO_ROOT, then discovery.
+
+    Discovery walks up from the *current working directory*, which is why the
+    env var matters: a notebook or a job started elsewhere would otherwise find
+    whichever repository happens to be above it.
+    """
+    if repo_root is not None:
+        return Path(repo_root).expanduser().resolve()
+    from_env = _env_path(ENV_REPO_ROOT)
+    if from_env is not None:
+        rr = from_env.resolve()
+        if not rr.is_dir():
+            raise ConfigError(f"${ENV_REPO_ROOT} is not a directory: {rr}")
+        return rr
+    return find_repo_root()
+
+
+def load_config(
+    repo_root: Path | None = None,
+    roots_file: str | Path | None = None,
+    registry_file: str | Path | None = None,
+) -> DatapathsConfig:
+    """Locate the two config files this package reads.
+
+    For each file the precedence is: explicit argument, then the environment
+    override, then the ``configs/`` default. Passing an argument explicitly is
+    therefore never overridden by an env var that happens to be set in the
+    shell -- the caller who names a file means it.
+    """
+    rr = resolve_repo_root(repo_root)
+
+    roots = roots_file if roots_file is not None else _env_path(ENV_ROOTS_FILE)
+    if roots is None:
+        roots = DEFAULT_ROOTS_FILE
+
+    registry = registry_file if registry_file is not None else _env_path(ENV_REGISTRY_FILE)
+    if registry is None:
+        registry = DEFAULT_REGISTRY_FILE
+
+    return DatapathsConfig(
+        roots_file=_resolve_against(rr, roots),
+        registry_file=_resolve_against(rr, registry),
+    )
+
+
+def load_roots(cfg: DatapathsConfig) -> dict[str, Path]:
+    if not cfg.roots_file.exists():
+        raise ConfigError(
+            f"roots file not found at {cfg.roots_file}. "
+            f"Create it (not committed) with absolute paths, or point "
+            f"${ENV_ROOTS_FILE} at one that exists."
+        )
+    data = yaml.safe_load(cfg.roots_file.read_text()) or {}
+    if not isinstance(data, dict) or not data:
+        raise ConfigError(f"Invalid roots file: {cfg.roots_file}")
+    roots: dict[str, Path] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not isinstance(v, (str, Path)):
+            continue
+        roots[k] = Path(v).expanduser().resolve()
+    return roots

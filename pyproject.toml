@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datapaths"
+version = "0.1.0"
+description = "Root-relative path resolution and a hashed artifact registry for data-analysis repositories"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "ShrRa" }]
+
+# Deliberately tiny. Anything heavier (pandas, pyarrow) is an optional extra:
+# a consumer that only resolves paths should not be made to install a
+# dataframe stack, and the ones that do save tabular artifacts already have it.
+dependencies = [
+  "pyyaml>=6.0",
+  "filelock>=3.13",
+]
+
+[project.optional-dependencies]
+# Needed only by save()/load() for the "parquet" and "csv" formats.
+tabular = [
+  "pandas>=2.0",
+  "pyarrow>=14.0",
+]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+datapaths = "datapaths.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ShrRa/datapaths"
+
+[tool.setuptools.packages.find]
+where = ["src"]
