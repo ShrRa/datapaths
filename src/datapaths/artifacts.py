@@ -10,9 +10,13 @@ import pickle
 from .exceptions import ArtifactError
 from .hashing import short_hash
 
+# The built-in types, not the permitted ones: this is a hint, never enforced at
+# runtime. Any string works as a type, and one naming a root in the roots file
+# resolves to it without an entry in TYPE_TO_ROOT below.
 ArtifactType = Literal["data", "dataprep", "features", "predictions", "models", "misc"]
 Format = Literal["parquet", "csv", "json", "bin", "pickle"]
 
+# Types whose root is not simply a root of the same name.
 TYPE_TO_ROOT: dict[str, str] = {
     "data": "data",
     "dataprep": "data",

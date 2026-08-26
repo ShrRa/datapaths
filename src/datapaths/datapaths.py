@@ -93,12 +93,29 @@ class Datapaths:
             raise ArtifactError("Registry record has no path field")
         return (self.roots[rk] / Path(str(rel))).resolve()
 
-    def _resolve_root(self, type: ArtifactType, root_key: str | None) -> str:
-        rk = root_key or TYPE_TO_ROOT.get(type)
+    def _resolve_root(self, type: ArtifactType | str, root_key: str | None) -> str:
+        """Pick the storage root for an artifact.
+
+        Order: an explicit root_key, then the built-in TYPE_TO_ROOT mapping,
+        then a root named after the type itself. The last one is what makes a
+        new kind of artifact a one-line change: declaring `plots:` in the roots
+        file is enough for type="plots" to work, with no edit here. TYPE_TO_ROOT
+        still wins, so "dataprep" keeps landing under the "data" root even for
+        someone who has also defined a "dataprep" root.
+        """
+        rk = root_key or TYPE_TO_ROOT.get(type) or (type if type in self.roots else None)
         if not rk:
-            raise ArtifactError(f"No root configured for type '{type}'")
+            known = ", ".join(sorted(set(TYPE_TO_ROOT) | set(self.roots))) or "none"
+            raise ArtifactError(
+                f"No root configured for type '{type}'. Pass root_key=..., or add "
+                f"a root named '{type}' to {self.cfg.roots_file}. "
+                f"Known types and roots: {known}."
+            )
         if rk not in self.roots:
-            raise ArtifactError(f"Root key '{rk}' not present in roots.local.yaml")
+            raise ArtifactError(
+                f"Root key '{rk}' not present in {self.cfg.roots_file}. "
+                f"Available: {', '.join(sorted(self.roots)) or 'none'}."
+            )
         return rk
 
     def save(
@@ -106,7 +123,7 @@ class Datapaths:
         obj: Any,
         *,
         name: str,
-        type: ArtifactType,
+        type: ArtifactType | str,
         fmt: Format = "parquet",
         relpath: str | None = None,
         root_key: str | None = None,
@@ -243,7 +260,7 @@ class Datapaths:
         self,
         *,
         name: str,
-        type: ArtifactType,
+        type: ArtifactType | str,
         src_path: str,
         fmt: Format,
         root_key: str | None = None,
@@ -327,7 +344,7 @@ class Datapaths:
         self,
         *,
         name: str | None = None,
-        type: ArtifactType | None = None,
+        type: ArtifactType | str | None = None,
         tag: str | list[str] | None = None,
         text: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -361,7 +378,7 @@ class Datapaths:
         *,
         columns: list[str] | None = None,
         name: str | None = None,
-        type: ArtifactType | None = None,
+        type: ArtifactType | str | None = None,
         tag: str | list[str] | None = None,
         text: str | None = None,
     ) -> None:
@@ -410,7 +427,7 @@ class Datapaths:
         self,
         *,
         names: Iterable[str] | None = None,
-        type: ArtifactType | None = None,
+        type: ArtifactType | str | None = None,
         tag: str | list[str] | None = None,
     ) -> list[dict[str, Any]]:
         wanted = set(names) if names else None

@@ -60,6 +60,44 @@ artifact reference mean the same thing to two people.
 Both are found relative to the repository root, which is discovered by walking up from the
 current working directory looking for `pyproject.toml` or `.git`.
 
+## Adding a root
+
+There is no command for this — a root is one line of YAML, and `roots.local.yaml` is
+uncommitted and machine-local by design, so it is meant to be edited by hand.
+
+Say you want somewhere to put plots. Create the directory, add it to the roots file:
+
+```yaml
+data: /mnt/scratch/mallorn/data
+features: /mnt/scratch/mallorn/features
+plots: /mnt/scratch/mallorn/plots     # new
+```
+
+and that is the whole setup. A type with no entry in `TYPE_TO_ROOT` falls back to a root of
+the same name, so the new root is usable immediately:
+
+```python
+dp = Datapaths()
+dp["plots"]                                              # the directory itself
+dp.save(png_bytes, name="lc_grid", type="plots", fmt="bin")
+dp.list(type="plots")
+dp.verify(type="plots")
+```
+
+Two details worth knowing:
+
+* **`type` is not a closed vocabulary.** The `ArtifactType` `Literal` names the built-in
+  types for editors and type checkers; it is never enforced at runtime, and any string
+  works. `TYPE_TO_ROOT` exists only for types whose root is *not* a root of the same name
+  (`dataprep` stores under `data`), and it takes precedence over the fallback — so defining
+  a `dataprep` root will not move existing `dataprep` artifacts.
+* **Family nesting is features-only.** An artifact of a custom type is written flat as
+  `{name}.{ext}`; only `type="features"` nests under `{family}/`. Pass `relpath=` if you
+  want a different arrangement.
+
+Every root must exist on disk and be an absolute path. If the type has no matching root the
+error names the file to edit and lists the types and roots it does know about.
+
 Note the roots file has **no top-level wrapper key** — the entries sit at the top level.
 (The registry file does nest everything under `artifacts:`, which makes this an easy
 mistake.) An entry that isn't a name mapped to a single path is skipped with a
@@ -141,7 +179,7 @@ pip install -e ".[tabular,dev]"
 pytest
 ```
 
-197 tests, about four seconds. Installing without the `tabular` extra is supported and
+212 tests, about four seconds. Installing without the `tabular` extra is supported and
 tested — the parquet/csv tests skip themselves rather than failing, so a consumer that only
 resolves paths can still run the suite.
 
